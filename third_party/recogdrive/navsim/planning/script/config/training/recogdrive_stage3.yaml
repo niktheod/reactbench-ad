@@ -8,17 +8,10 @@ defaults:
   - override /agent: recogdrive_agent
   - _self_
 
-# Optional paired edited-scene monitor during training (development only; not needed for training).
-edited_validation: false
-validation_config: null
-edited_validation_protocol: paired
-mixed_training_manifest: null
+mixed_training_manifest: null  # a kinematic-SFT training view (ReactTrain); null: upstream RL training
 lr_warmup_updates: 0  # mixed data only: linear LR warmup before the per-update cosine
-fixed_update_checkpoint_interval: 0
 stop_after_updates: 0  # mixed data only: end early with final validation; the LR schedule keeps max_steps
-# Hazard SFT only: paired edited monitoring beside the triplets, and the
-# originals drawn per epoch (null: as many as the hazardous training edits).
-paired_validation_config: null
-hazard_sft_originals_per_epoch: null
+# Kinematic SFT: originals drawn per epoch (null: as many as the hazardous training edits).
+kinematic_sft_originals_per_epoch: null
 agent:
   grpo: true

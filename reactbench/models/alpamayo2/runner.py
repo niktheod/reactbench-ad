@@ -295,14 +295,10 @@ def main(dataset, argv=None):
                     metrics_kwargs = {key: context[key] for key in
                         ("actor_motion", "speed_mps", "longitudinal_acceleration_mps2", "vehicle_geometry")
                         if key in context}
-                    if dataset == "navsim":
-                        from ...scoring.motion_bins import NAVSIM_BIN_SPEC_ID
-                        metrics_kwargs["bin_spec"] = NAVSIM_BIN_SPEC_ID
                     # Bookkeeping only; every metric comes from protocol V2 scoring (postprocess_evaluation).
                     from ...scoring.records import sample_record
                     metrics = sample_record(
-                        token=token, output_stem=token, original_trajectory=cached[token][:40],
-                        edited_trajectory=poses[:40], interval_length_s=0.1, **metrics_kwargs)
+                        token=token, output_stem=token, **metrics_kwargs)
                     records.append({**metrics, **basic, **context})
             except Exception as exc:
                 failures.append(failure(token, stage, exc))

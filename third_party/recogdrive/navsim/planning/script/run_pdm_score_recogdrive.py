@@ -3,6 +3,8 @@ from pathlib import Path
 from dataclasses import asdict
 from datetime import datetime
 from contextlib import nullcontext
+import hashlib
+import json
 import traceback
 import logging
 import lzma
@@ -35,6 +37,15 @@ logger = logging.getLogger(__name__)
 
 CONFIG_PATH = "config/pdm_scoring"
 CONFIG_NAME = "default_run_pdm_score"
+# Seeds of +inference_seed: a per-token hash; this protocol string keeps the paper's navtest seeds.
+INFERENCE_SEED_PROTOCOL = "recogdrive-edited-paired-nc-dac-v1"
+
+
+def inference_seed_for_token(token: str, seed: int) -> int:
+    """First 63 bits of SHA-256 of the canonical JSON {protocol, source token, seed}."""
+    material = json.dumps({"protocol": INFERENCE_SEED_PROTOCOL, "source": token, "seed": seed},
+                          sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return int(hashlib.sha256(material.encode()).hexdigest()[:16], 16) >> 1
 
 class InferenceSampler(torch.utils.data.sampler.Sampler):
     def __init__(self, size):
@@ -115,8 +126,7 @@ def run_pdm_score(args: List[Dict[str, Union[List[str], DictConfig]]]) -> List[D
             context = torch.random.fork_rng(devices=[torch.cuda.current_device()]) if seeded else nullcontext()
             with context:
                 if seeded:
-                    from navsim.planning.training.recogdrive_paired_validation import source_seed
-                    score_row["inference_seed"] = source_seed(token, int(cfg.inference_seed))
+                    score_row["inference_seed"] = inference_seed_for_token(token, int(cfg.inference_seed))
                     torch.manual_seed(score_row["inference_seed"])
                 if requires_scene:
                     scene = scene_loader.get_scene_from_token(token)

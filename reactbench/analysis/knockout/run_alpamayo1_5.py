@@ -48,8 +48,6 @@ def main(argv: Sequence[str] | None = None) -> None:
     config_path = resolve_file(args.config, "Alpamayo PAI-AV configuration")
     cfg = load_yaml_mapping(config_path)
     inference = AlpamayoInference.from_config(cfg)
-    if inference.vlm_only:
-        raise ValueError("The knockout needs the diffusion-expert agent, not the VLM-only backend")
     reseed = dataclasses.replace(inference, seed_base=inference.seed_base + RESEED_BASE_OFFSET)
 
     with PAIAVCompactRun(run_dir) as loader:

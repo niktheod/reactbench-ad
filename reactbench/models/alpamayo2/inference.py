@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
-import hashlib
 import os
 from pathlib import Path
 import random
@@ -17,6 +16,7 @@ import numpy as np
 import torch
 
 from ... import paths
+from .. import seeds
 from ..alpamayo1_5.agent_paiav import native_ego_history_tensors
 
 
@@ -33,10 +33,7 @@ def paired_seed(token: str, base_seed: int, stream: str) -> int:
         raise ValueError("token must be a nonempty filename component")
     if stream not in ("text", "diffusion"):
         raise ValueError("Unknown paired random stream")
-    if not 0 <= int(base_seed) <= (1 << 63) - 1:
-        raise ValueError("seed must be between 0 and 2**63 - 1")
-    material = f"alpamayo2:{stream}:{int(base_seed)}:{token}".encode()
-    return int.from_bytes(hashlib.sha256(material).digest()[:8], "big") >> 1
+    return seeds.paired_seed(f"alpamayo2:{stream}", base_seed, token)
 
 
 def _cuda_indices(devices) -> list[int]:

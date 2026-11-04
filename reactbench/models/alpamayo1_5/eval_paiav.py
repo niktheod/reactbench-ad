@@ -1,9 +1,9 @@
-"""Run Alpamayo 1.5 on a compact ReactPAI run: originals, edited scenes, CoT swap and fixed CoTs.
+"""Run Alpamayo 1.5 on a compact ReactPAI run: original and edited scenes.
 
     python -m reactbench.models.alpamayo1_5.eval_paiav RUN_DIR --original    # cache original predictions
     python -m reactbench.models.alpamayo1_5.eval_paiav RUN_DIR               # edited predictions + scoring
-    python -m reactbench.models.alpamayo1_5.eval_paiav RUN_DIR --cot-swap    # O/E images x O/E CoTs
-    python -m reactbench.models.alpamayo1_5.eval_paiav RUN_DIR --fixed-cots  # five fixed CoTs
+
+The CoT interventions (CoT swap, fixed CoTs) are ``python -m reactbench.analysis.cot.run_alpamayo1_5``.
 
 Inputs: four 10 Hz frames of the cross-left, front-wide, cross-right and front-tele cameras and the
 native 16-step ego history; no navigation command. Original images are decoded from the PAI-AV
@@ -25,19 +25,6 @@ from typing import Any, Mapping, Optional, Sequence
 import numpy as np
 import yaml
 
-from ...analysis.cot.cot_swap import (
-    CROSSED_EDITED_IMAGE,
-    CROSSED_ORIGINAL_IMAGE,
-    FACTORIAL_CONDITIONS,
-    NATURAL_EDITED,
-    NATURAL_ORIGINAL,
-    aggregate_cot_swap_records,
-    build_cot_swap_record,
-    intervention_reasoning,
-    load_cot_swap_sources,
-)
-from ...analysis.cot.fixed_cot import add_arguments as add_fixed_cot_arguments
-from ...analysis.cot.fixed_cot import validate_arguments as validate_fixed_cot_arguments
 from ...datasets.paiav import CAMERA_NAMES, PAIAVCompactRun
 from ...scoring.actor_motion import actor_motion_from_metadata
 from ...scoring.paiav import postprocess_evaluation as postprocess_collisions
@@ -48,23 +35,6 @@ from .inference import AlpamayoInference
 
 MODEL_NAME = "alpamayo1_5"
 DEFAULT_CONFIG_PATH = Path(__file__).with_name("config_paiav.yaml")
-COT_SWAP_RESULT_SUFFIX = "_cot_swap"
-MAX_TORCH_SEED = (1 << 63) - 1
-
-
-def diffusion_seed_for_token(token: str, base_seed: int) -> int:
-    """Derive a stable per-token seed shared by its original/edited pair."""
-
-    if not isinstance(token, str) or not token:
-        raise ValueError("token must be a non-empty string")
-    base_seed = int(base_seed)
-    if not 0 <= base_seed <= MAX_TORCH_SEED:
-        raise ValueError(
-            "base_seed must be between 0 and 2**63 - 1, "
-            f"got {base_seed}"
-        )
-    material = f"alpamayo-diffusion:{base_seed}:{token}".encode("utf-8")
-    return int.from_bytes(hashlib.sha256(material).digest()[:8], "big") >> 1
 
 
 def parse_args(
@@ -78,19 +48,10 @@ def parse_args(
     )
     parser.add_argument("run_dir", type=Path, help="Compact PAI-AV run directory")
     parser.add_argument("--config", type=Path, default=default_config)
-    inference_mode = parser.add_mutually_exclusive_group()
-    inference_mode.add_argument(
+    parser.add_argument(
         "--original",
         action="store_true",
         help="Run and cache only original-image predictions.",
-    )
-    inference_mode.add_argument(
-        "--cot-swap",
-        action="store_true",
-        help=(
-            "Use cached natural CoTs to run original-image/edited-CoT and "
-            "edited-image/original-CoT interventions."
-        ),
     )
     sample_selection = parser.add_mutually_exclusive_group()
     sample_selection.add_argument(
@@ -116,9 +77,7 @@ def parse_args(
     )
     parser.add_argument("--dataset", default="reactpai")
     parser.add_argument("--scoring", choices=("score", "off"), default="score")
-    add_fixed_cot_arguments(parser)
     args = parser.parse_args(argv)
-    validate_fixed_cot_arguments(parser, args)
     if args.max_samples is not None and args.max_samples <= 0:
         parser.error("--max-samples must be positive")
     if args.original and args.original_result_dir is not None:
@@ -251,10 +210,8 @@ def metric_trajectory(
     return poses[:count]
 
 
-def result_name_for_run(run_dir: Path, *, original: bool = False, cot_swap: bool = False) -> str:
-    if original and cot_swap:
-        raise ValueError("original and cot_swap result modes are mutually exclusive")
-    return ("original" if original else run_dir.name) + (COT_SWAP_RESULT_SUFFIX if cot_swap else "")
+def result_name_for_run(run_dir: Path, *, original: bool = False) -> str:
+    return "original" if original else run_dir.name
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -271,18 +228,13 @@ def main(argv: Sequence[str] | None = None) -> None:
     if not isinstance(cfg, dict):
         raise ValueError(f"Expected a YAML mapping in {config_path}")
     inference = AlpamayoInference.from_config(cfg)
-    if args.fixed_cots:
-        from ...analysis.cot.fixed_cot_runner import run_fixed_cots
-        return run_fixed_cots(sys.modules[__name__], args, inference=inference)
     trajectory_config = cfg.get("trajectory_sampling", {})
     interval_length_s = float(trajectory_config.get("interval_length", 0.1))
     metric_horizon_value = cfg.get("metric_horizon_s")
     metric_horizon_s = (
         None if metric_horizon_value is None else float(metric_horizon_value)
     )
-    natural_edited_result_dir = predictions_dir(MODEL_NAME, args.dataset, result_name_for_run(run_dir))
-    result_dir = predictions_dir(MODEL_NAME, args.dataset,
-                                 result_name_for_run(run_dir, original=args.original, cot_swap=args.cot_swap))
+    result_dir = predictions_dir(MODEL_NAME, args.dataset, result_name_for_run(run_dir, original=args.original))
     default_original_result_dir = predictions_dir(MODEL_NAME, args.dataset, result_name_for_run(run_dir, original=True))
     original_result_dir = (
         default_original_result_dir
@@ -330,32 +282,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 expected_source_contracts=source_contracts,
             )
         )
-        cot_swap_sources = (
-            load_cot_swap_sources(
-                original_result_dir,
-                natural_edited_result_dir,
-                tokens=tokens,
-                interval_length_s=interval_length_s,
-                expected_edited_summary={
-                    "model_name_or_path": cfg.get("model_name_or_path"),
-                    "attn_implementation": cfg.get("attn_implementation"),
-                    "vlm_seed": int(cfg.get("seed", 42)),
-                    f"{inference.seed_key}_base": inference.seed_base,
-                    **inference.identity_metadata(config_path),
-                    "interval_length_s": interval_length_s,
-                    "metric_horizon_s": metric_horizon_s,
-                },
-            )
-            if args.cot_swap
-            else None
-        )
-        mode_name = (
-            "original"
-            if args.original
-            else "CoT-swap"
-            if args.cot_swap
-            else "edited"
-        )
+        mode_name = "original" if args.original else "edited"
         print(f"Evaluating {len(tokens)} PAI-AV {mode_name} samples from {run_dir}", flush=True)
         agent = instantiate(cfg)
         agent.initialize()
@@ -393,177 +320,6 @@ def main(argv: Sequence[str] | None = None) -> None:
                             original_prediction.extra,
                         )
                     successful_tokens.append(token)
-                elif args.cot_swap:
-                    assert cot_swap_sources is not None
-                    edited_paths = loader.edited_camera_paths(token)
-                    ego_geometry, geometry_source = (
-                        loader.ego_vehicle_geometry(token)
-                    )
-                    speed_mps = loader.current_speed_mps(token)
-                    longitudinal_acceleration_mps2 = (
-                        loader.current_longitudinal_acceleration_mps2(token)
-                    )
-                    metadata, metadata_path = loader.metadata(token)
-                    actor_motion = actor_motion_from_metadata(
-                        metadata, camera_name=None
-                    )
-                    original_cot = cot_swap_sources.original_cots[token]
-                    edited_cot = cot_swap_sources.edited_cots[token]
-                    original_poses = cached_originals[token]
-                    natural_edited_poses = (
-                        cot_swap_sources.edited_trajectories[token]
-                    )
-                    condition_provenance: dict[str, dict[str, Any]] = {
-                        NATURAL_ORIGINAL: {
-                            "inference": "natural",
-                            "trajectory_path": str(
-                                original_result_dir
-                                / "trajectories"
-                                / f"{token}.npz"
-                            ),
-                            "reasoning_path": str(original_cot.path),
-                            "reasoning_sha256": original_cot.sha256,
-                        },
-                        NATURAL_EDITED: {
-                            "inference": "natural",
-                            "trajectory_path": str(
-                                natural_edited_result_dir
-                                / "trajectories"
-                                / f"{token}.npz"
-                            ),
-                            "reasoning_path": str(edited_cot.path),
-                            "reasoning_sha256": edited_cot.sha256,
-                        },
-                    }
-
-                    with loader.materialize_original_images(
-                        token
-                    ) as original_paths:
-                        stage = "original_image_edited_cot_inference"
-                        crossed_original_prediction = agent.compute_trajectory(
-                            make_input(
-                                ego_history,
-                                original_paths,
-                            ),
-                            forced_cot=edited_cot.text,
-                            **inference.seed_kwargs(pair_seed),
-                        )
-                        crossed_original_root = (
-                            result_dir / CROSSED_ORIGINAL_IMAGE
-                        )
-                        crossed_original_poses = save_prediction(
-                            crossed_original_root / "trajectories",
-                            token,
-                            crossed_original_prediction,
-                            interval_length_s=interval_length_s,
-                        )
-                        crossed_original_reasoning_path = (
-                            crossed_original_root / "reasoning" / f"{token}.json"
-                        )
-                        save_json(
-                            crossed_original_reasoning_path,
-                            intervention_reasoning(
-                                crossed_original_prediction.extra,
-                                condition=CROSSED_ORIGINAL_IMAGE,
-                                donor_cot=edited_cot,
-                                **inference.seed_kwargs(pair_seed),
-                            ),
-                        )
-                        condition_provenance[CROSSED_ORIGINAL_IMAGE] = {
-                            "inference": "forced_cot_token_replay",
-                            "trajectory_path": str(
-                                crossed_original_root
-                                / "trajectories"
-                                / f"{token}.npz"
-                            ),
-                            "reasoning_path": str(
-                                crossed_original_reasoning_path
-                            ),
-                            "donor_reasoning_path": str(edited_cot.path),
-                            "donor_reasoning_sha256": edited_cot.sha256,
-                        }
-
-                    stage = "edited_image_original_cot_inference"
-                    crossed_edited_prediction = agent.compute_trajectory(
-                        make_input(
-                            ego_history,
-                            edited_paths,
-                        ),
-                        forced_cot=original_cot.text,
-                        **inference.seed_kwargs(pair_seed),
-                    )
-                    crossed_edited_root = result_dir / CROSSED_EDITED_IMAGE
-                    crossed_edited_poses = save_prediction(
-                        crossed_edited_root / "trajectories",
-                        token,
-                        crossed_edited_prediction,
-                        interval_length_s=interval_length_s,
-                    )
-                    crossed_edited_reasoning_path = (
-                        crossed_edited_root / "reasoning" / f"{token}.json"
-                    )
-                    save_json(
-                        crossed_edited_reasoning_path,
-                        intervention_reasoning(
-                            crossed_edited_prediction.extra,
-                            condition=CROSSED_EDITED_IMAGE,
-                            donor_cot=original_cot,
-                            **inference.seed_kwargs(pair_seed),
-                        ),
-                    )
-                    condition_provenance[CROSSED_EDITED_IMAGE] = {
-                        "inference": "forced_cot_token_replay",
-                        "trajectory_path": str(
-                            crossed_edited_root
-                            / "trajectories"
-                            / f"{token}.npz"
-                        ),
-                        "reasoning_path": str(crossed_edited_reasoning_path),
-                        "donor_reasoning_path": str(original_cot.path),
-                        "donor_reasoning_sha256": original_cot.sha256,
-                    }
-
-                    stage = "cot_swap_metrics"
-                    factorial_full = {
-                        NATURAL_ORIGINAL: original_poses,
-                        NATURAL_EDITED: natural_edited_poses,
-                        CROSSED_ORIGINAL_IMAGE: crossed_original_poses,
-                        CROSSED_EDITED_IMAGE: crossed_edited_poses,
-                    }
-                    factorial_metric = {
-                        condition: metric_trajectory(
-                            poses,
-                            interval_length_s=interval_length_s,
-                            metric_horizon_s=metric_horizon_s,
-                        )
-                        for condition, poses in factorial_full.items()
-                    }
-                    metrics = build_cot_swap_record(
-                        token=token,
-                        trajectories=factorial_metric,
-                        actor_motion=actor_motion,
-                        interval_length_s=interval_length_s,
-                        speed_mps=speed_mps,
-                        longitudinal_acceleration_mps2=(
-                            longitudinal_acceleration_mps2
-                        ),
-                        **inference.seed_kwargs(pair_seed),
-                        condition_provenance=condition_provenance,
-                    )
-                    metrics.update(
-                        {
-                            "placement_metadata_path": str(metadata_path),
-                            "native_pose_counts": {
-                                condition: int(poses.shape[0])
-                                for condition, poses in factorial_full.items()
-                            },
-                            "ego_vehicle_geometry": ego_geometry,
-                            "ego_vehicle_geometry_source": geometry_source,
-                            "alpamayo_ego_history_source": history_source,
-                            "original_image_sources": source_contract,
-                        }
-                    )
-                    metric_records.append(metrics)
                 else:
                     edited_paths = loader.edited_camera_paths(token)
                     ego_geometry, geometry_source = (
@@ -604,7 +360,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                         interval_length_s=interval_length_s,
                         metric_horizon_s=metric_horizon_s,
                     )
-                    edited_metric_poses = metric_trajectory(
+                    # The edited plan must also cover the metric horizon.
+                    metric_trajectory(
                         edited_poses,
                         interval_length_s=interval_length_s,
                         metric_horizon_s=metric_horizon_s,
@@ -612,11 +369,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                     metrics = sample_record(
                         token=token,
                         output_stem=output_stem,
-                        original_trajectory=original_metric_poses,
-                        edited_trajectory=edited_metric_poses,
                         actor_motion=actor_motion,
                         vehicle_geometry=ego_geometry,
-                        interval_length_s=interval_length_s,
                         speed_mps=speed_mps,
                         longitudinal_acceleration_mps2=(
                             longitudinal_acceleration_mps2
@@ -669,68 +423,6 @@ def main(argv: Sequence[str] | None = None) -> None:
         preflight = loader.preflight_report()
 
     save_json(failures_path, failed_samples)
-    if args.cot_swap:
-        save_json(metrics_dir / "per_sample.json", metric_records)
-        summary = aggregate_cot_swap_records(metric_records)
-        summary.update(
-            {
-                "mode": "cot_swap",
-                "dataset": "pai-av",
-                "run_dir": str(run_dir),
-                "result_dir": str(result_dir),
-                "natural_original_result_dir": str(original_result_dir),
-                "natural_edited_result_dir": str(
-                    natural_edited_result_dir
-                ),
-                "natural_edited_summary_path": str(
-                    cot_swap_sources.edited_summary_path
-                ),
-                "natural_edited_summary_sha256": (
-                    cot_swap_sources.edited_summary_sha256
-                ),
-                "evaluation_config_path": str(config_path),
-                "model_name_or_path": cfg.get("model_name_or_path"),
-                "attn_implementation": cfg.get("attn_implementation"),
-                **inference.metadata(config_path),
-                "intervention": (
-                    "decoded donor CoT is forced as assistant tokens; hidden "
-                    "states are recomputed with the selected image"
-                ),
-                "conditions": summary["conditions"],
-                "condition_order": list(FACTORIAL_CONDITIONS),
-                "interval_length_s": interval_length_s,
-                "metric_horizon_s": metric_horizon_s,
-                "selected_token_count": len(tokens),
-                "successful_token_count": len(metric_records),
-                "failed_sample_count": len(failed_samples),
-                "compact_run_preflight": preflight,
-                "metric_definitions": {
-                    "condition_metrics": (
-                        "distance driven; collision metrics come from "
-                        "protocol V2 scoring (metrics/paiav_at_fault_*)"
-                    ),
-                    "contrast_ade_m": (
-                        "mean corresponding-pose x/y displacement from the "
-                        "named from_condition to to_condition"
-                    ),
-                    "contrast_delta": (
-                        "to_condition value minus from_condition value"
-                    ),
-                    "interaction_difference_in_differences": (
-                        "(edited-image effect with edited CoT) minus "
-                        "(edited-image effect with original CoT)"
-                    ),
-                },
-            }
-        )
-        save_json(metrics_dir / "summary.json", summary)
-        print(
-            f"Saved {len(metric_records)} PAI-AV CoT-swap results to "
-            f"{result_dir}; {len(failed_samples)} samples failed.",
-            flush=True,
-        )
-        postprocess_collisions(result_dir, args.scoring)
-        return
     if args.original:
         manifest_path = save_original_manifest(
             result_dir,

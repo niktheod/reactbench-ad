@@ -610,10 +610,3 @@ def make_contact_sheet(paths: Dict[Tuple[int, str], Path], output_path: Path, ti
             draw.text((x + 5, y + 7), f"t{frame_idx - 3:+d}  {camera}", fill=(235, 235, 235))
     output_path.parent.mkdir(parents=True, exist_ok=True)
     sheet.save(output_path, quality=92)
-
-
-if __name__ == "__main__":
-    raise SystemExit(
-        "This module now provides geometry utilities only. Use "
-        "python -m reactbench.compositing.paiav.edit with --timestep."
-    )

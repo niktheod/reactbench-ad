@@ -89,18 +89,6 @@ def at_fault_from_physical(physical, poses, interval_length_s, actor_motion, wor
             "interval_length_s": interval_length_s}
 
 
-def score_prediction_any_contact(poses, interval_length_s, actor_motion, world):
-    """Physical contacts with any road user, not only at-fault ones (protocol V1); actor_motion=None scores an
-    unedited scene. ReactBench reports the at-fault scores; this one serves the optional training-time monitor
-    of the ReCogDrive fork (third_party/recogdrive)."""
-    collision = score_raw_trajectory(poses, actor_motion, world["geometry"], world,
-                                     interval_length_s=interval_length_s)
-    dac = raw_dac(poses, interval_length_s, world)
-    return {**collision, **dac, "nc_all": int(not collision["all"]), "nc_inserted": int(not collision["inserted"]),
-            "nc_dac": int(not collision["all"]) * dac["dac"] if dac["dac"] is not None else None,
-            "interval_length_s": interval_length_s}
-
-
 def score_prediction_at_fault(poses, interval_length_s, actor_motion, world, map_context):
     """V2 scalar reference: physical contacts as V1, then at-fault classification."""
     physical = score_raw_trajectory(poses, actor_motion, world["geometry"], world,

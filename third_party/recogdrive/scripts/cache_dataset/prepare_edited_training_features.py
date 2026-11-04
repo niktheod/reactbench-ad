@@ -69,7 +69,7 @@ class FeatureExtractor:
         if self.builder is None:
             from navsim.agents.recogdrive.recogdrive_features import ReCogDriveFeatureBuilder
             if not torch.cuda.is_available():
-                raise RuntimeError("Feature extraction requires a GPU; use the Slurm launcher")
+                raise RuntimeError("Feature extraction requires a CUDA GPU")
             self.builder = ReCogDriveFeatureBuilder(cache_hidden_state=True, cache_mode=True,
                 model_type="internvl", checkpoint_path=str(self.vlm_path), device="cuda:0")
             self.builder.backbone.requires_grad_(False).eval()

@@ -126,12 +126,6 @@ def add_arguments(parser):
                         help="Evaluate five fixed CoTs; defaults to the bundled fixed_cots.yaml.")
 
 
-def validate_arguments(parser, args):
-    if args.fixed_cots and (args.original or getattr(args, "cot_swap", False)
-                           or getattr(args, "replay_controls", False)):
-        parser.error("--fixed-cots cannot be combined with --original or CoT-swap options")
-
-
 def prepare_manifest(root, identity, tokens):
     path = root / "evaluation_manifest.json"
     if path.exists():

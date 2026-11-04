@@ -618,10 +618,6 @@ def configure_engine_args(args: argparse.Namespace, run_dir: Path, asset_root: P
     args.max_samples = args.max_clips
     args.gait_frame_advance = 23
     args.gait_timestep_s = 0.5
-    args.preview = False
-    args.shadow_labels = None
-    args.contact_only = True
-    args.shadow_label_lookup = None
     args.shadow_label_metadata = compositor.contact_only_shadow_metadata()
     # A completed token is already self-contained and has a completion
     # manifest.  Preserve it on a resumed launch instead of needlessly
@@ -1081,8 +1077,8 @@ def main() -> int:
         print(f"POSE_POLICY={compositor.STANDING_POSE_VERSION}")
     else:
         print("POSE_POLICY=rigid_static_vehicle")
-    print(f"HISTORY_INTERVAL_S=0.1")
-    print(f"SHADOW_POLICY=uniform_contact_only")
+    print("HISTORY_INTERVAL_S=0.1")
+    print("SHADOW_POLICY=uniform_contact_only")
 
     prepared_tokens = []
     jobs = []
@@ -1195,9 +1191,9 @@ def main() -> int:
     print(f"Finished: {successful} successful, {failed} failed")
     print(f"Output: {run_dir}")
     # Per-clip failures are an expected, recoverable batch outcome and are
-    # recorded in failures.jsonl/summary.json.  Keep the coordinator job
-    # successful so the dependent PCTNet job can harmonize every clip that did
-    # complete; process-level exceptions still make the Slurm job fail.
+    # recorded in failures.jsonl/summary.json.  Exit successfully so that PCTNet
+    # can harmonize every clip that did complete; process-level exceptions still
+    # exit with an error.
     return 0
 
 

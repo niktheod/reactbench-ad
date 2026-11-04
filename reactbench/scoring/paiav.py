@@ -5,7 +5,7 @@ Usage::
     python -m reactbench.scoring.paiav RESULT_DIR [RESULT_DIR ...] [--output-root DIR]
 
 Each run gets ``metrics/paiav_at_fault_{per_sample,summary,manifest}.json``. The recorded PAI-AV
-obstacle labels must be downloaded first (``python -m reactbench.datasets.paiav_obstacles``).
+obstacle labels come with the ReactPAI download (``python -m reactbench.datasets.download_reactpai``).
 """
 from __future__ import annotations
 
@@ -37,7 +37,8 @@ def load_config(overrides=None):
     config = {**DEFAULTS,
               "data_root": str(paths.get("paiav_root", required=False) or ""),
               "selection_manifest": str(paths.get("reactpai_manifest", "data/reactpai/selection_manifest.json")),
-              "obstacle_root": str(paths.get("paiav_obstacles", paths.outputs("work", "paiav", "resources"))),
+              # The obstacle labels are part of the PAI-AV download (download_reactpai).
+              "obstacle_root": str(paths.get("paiav_root", required=False) or ""),
               "work_root": str(paths.get("scoring_work_paiav", paths.outputs("work", "paiav")))}
     config.update({k: v for k, v in (overrides or {}).items() if v is not None})
     for key in ("data_root", "selection_manifest", "obstacle_root", "work_root"):
@@ -96,9 +97,6 @@ def inventory_result(root):
         if inventory["mode"] == "fixed_cots":
             for name in identity.get("conditions", {}):
                 task["pairs"][f"intervention/{name}"] = ["natural_edited", name]
-        for name, replay in row.get("replay_controls", {}).items():
-            if replay.get("reference_condition"):
-                task["pairs"][f"replay/{name}"] = [replay["reference_condition"], name]
     return inventory
 
 

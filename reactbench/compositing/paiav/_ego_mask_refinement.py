@@ -1,7 +1,7 @@
 """Frozen numerical method v2_outer_contour_04; no dataset or experiment paths.
 
-Ported from the accepted 50-clip development and 30-clip validation experiments.
-The constants below intentionally retain the tested search ranges and thresholds.
+Refines the projected hood outline of the PAI-AV ego vehicle in the front camera.
+The constants below are the search ranges and thresholds used for the paper's runs.
 """
 import math
 import numpy as np

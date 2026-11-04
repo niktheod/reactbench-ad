@@ -12,18 +12,13 @@ from PIL import Image
 
 
 from ... import paths
+from ..seeds import paired_seed
 
 SIMWAM_REPO_ROOT = Path(os.environ.get("SIMWAM_REPO_ROOT", paths.REPO_ROOT / "third_party" / "SimWAM")).expanduser()
 MAX_SEED = (1 << 63) - 1
 VAE_FILE = Path("DiffSynth-Studio/Wan-Series-Converted-Safetensors/Wan2.2_VAE.safetensors")
 SUPPORTED_DATA = {"camera_layout": "front", "video_frame_mode": "current_plus_future",
                   "trajectory_mode": "absolute", "normalize_action": True, "use_dynamic_prompt": False}
-
-
-def paired_seed(token, base_seed):
-    """Stable per-token noise seed shared by an original/edited pair."""
-    material = f"simwam-action-noise:{int(base_seed)}:{token}".encode("utf-8")
-    return int.from_bytes(hashlib.sha256(material).digest()[:8], "big") >> 1
 
 
 def upstream_dataset_class():
@@ -131,7 +126,7 @@ class SimWAMAgent:
         return float(self.trajectory_sampling["interval_length"])
 
     def rollout_seed(self, token):
-        return paired_seed(token, self.seed) if self.per_token_seed else self.seed
+        return paired_seed("simwam-action-noise", self.seed, token) if self.per_token_seed else self.seed
 
     def identity(self):
         stat = self.checkpoint_path.stat() if self.checkpoint_path.is_file() else None

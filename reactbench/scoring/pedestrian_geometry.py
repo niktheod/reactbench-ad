@@ -275,20 +275,6 @@ def normalize_pedestrian_geometry(
     }
 
 
-def local_bounds_corners(
-    local_bounds_m: Mapping[str, Sequence[float]],
-) -> list[list[float]]:
-    """Return all eight corners of a validated local 3D box."""
-
-    bounds = normalize_local_bounds(local_bounds_m)
-    return [
-        [x, y, z]
-        for x in bounds["x"]
-        for y in bounds["y"]
-        for z in bounds["z"]
-    ]
-
-
 def local_forward_vector(local_forward_axis: str) -> tuple[float, float]:
     try:
         return _FORWARD_VECTORS[str(local_forward_axis)]

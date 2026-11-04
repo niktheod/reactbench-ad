@@ -13,6 +13,7 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
+from ...models.alpamayo1_5.forced_cot import forced_cot_prefix
 from ...models.original_cache import load_cached_trajectory
 from ...scoring.geometry import average_displacement_error, trajectory_distance_driven
 
@@ -21,8 +22,6 @@ NATURAL_ORIGINAL = "original_image_original_cot"
 NATURAL_EDITED = "edited_image_edited_cot"
 CROSSED_ORIGINAL_IMAGE = "original_image_edited_cot"
 CROSSED_EDITED_IMAGE = "edited_image_original_cot"
-REPLAY_ORIGINAL = "replay_original_image_original_cot"
-REPLAY_EDITED = "replay_edited_image_edited_cot"
 
 FACTORIAL_CONDITIONS = (
     NATURAL_ORIGINAL,
@@ -30,11 +29,6 @@ FACTORIAL_CONDITIONS = (
     CROSSED_ORIGINAL_IMAGE,
     CROSSED_EDITED_IMAGE,
 )
-CROSSED_CONDITIONS = (
-    CROSSED_ORIGINAL_IMAGE,
-    CROSSED_EDITED_IMAGE,
-)
-REPLAY_CONDITIONS = (REPLAY_ORIGINAL, REPLAY_EDITED)
 
 CONDITION_SOURCES = {
     NATURAL_ORIGINAL: {"image_source": "original", "cot_source": "original"},
@@ -47,8 +41,6 @@ CONDITION_SOURCES = {
         "image_source": "edited",
         "cot_source": "original",
     },
-    REPLAY_ORIGINAL: {"image_source": "original", "cot_source": "original"},
-    REPLAY_EDITED: {"image_source": "edited", "cot_source": "edited"},
 }
 
 CONTRASTS = {
@@ -71,13 +63,6 @@ CONTRASTS = {
     ),
 }
 
-RESERVED_COT_TOKENS = (
-    "<|cot_start|>",
-    "<|cot_end|>",
-    "<|traj_future_start|>",
-    "<|traj_future_end|>",
-)
-
 
 @dataclass(frozen=True)
 class SavedCot:
@@ -97,20 +82,6 @@ class CotSwapSources:
     edited_trajectories: dict[str, np.ndarray]
     edited_summary_path: Path | None
     edited_summary_sha256: str | None
-
-
-def forced_cot_prefix(cot: str) -> str:
-    """Return the complete assistant prefix consumed by trajectory generation."""
-
-    if not isinstance(cot, str):
-        raise TypeError(f"forced_cot must be a string, got {type(cot).__name__}")
-    contained = [token for token in RESERVED_COT_TOKENS if token in cot]
-    if contained:
-        raise ValueError(
-            "forced_cot contains reserved Alpamayo token(s): "
-            f"{contained}"
-        )
-    return f"<|cot_start|>{cot}<|cot_end|><|traj_future_start|>"
 
 
 def _unwrap_singleton_cot(value: Any, path: Path) -> str:
@@ -325,7 +296,6 @@ def build_cot_swap_record(
     generation_seed: int | None = None,
     longitudinal_acceleration_mps2: float | None = None,
     condition_provenance: Mapping[str, Mapping[str, Any]] | None = None,
-    replay_trajectories: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build explicitly named four-condition trajectory comparisons for one token."""
 
@@ -381,27 +351,6 @@ def build_cot_swap_record(
         ),
     }
 
-    if replay_trajectories:
-        required_replays = [
-            name for name in REPLAY_CONDITIONS if name not in replay_trajectories
-        ]
-        if required_replays:
-            raise ValueError(f"Missing self-replay trajectories: {required_replays}")
-        replay_controls: dict[str, Any] = {}
-        for replay_name, natural_name in (
-            (REPLAY_ORIGINAL, NATURAL_ORIGINAL),
-            (REPLAY_EDITED, NATURAL_EDITED),
-        ):
-            replay_controls[replay_name] = {
-                **CONDITION_SOURCES[replay_name],
-                "reference_condition": natural_name,
-                "ade_m": average_displacement_error(
-                    trajectories[natural_name], replay_trajectories[replay_name]
-                ),
-                **_condition_metrics(replay_trajectories[replay_name]),
-                **dict(condition_provenance.get(replay_name, {})),
-            }
-        record["replay_controls"] = replay_controls
     return record
 
 
@@ -452,20 +401,4 @@ def aggregate_cot_swap_records(records: Sequence[Mapping[str, Any]]) -> dict[str
             for field in ("trajectory_mean_norm_m", "distance_driven_m")
         },
     }
-    if records and all("replay_controls" in record for record in records):
-        summary["replay_controls"] = {
-            replay: {
-                "reference_condition": (
-                    NATURAL_ORIGINAL if replay == REPLAY_ORIGINAL else NATURAL_EDITED
-                ),
-                "count": len(records),
-                "mean_ade_m": _mean(
-                    [
-                        float(record["replay_controls"][replay]["ade_m"])
-                        for record in records
-                    ]
-                ),
-            }
-            for replay in REPLAY_CONDITIONS
-        }
     return summary

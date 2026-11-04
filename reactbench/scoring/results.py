@@ -21,17 +21,15 @@ def _path(value, base):
 
 
 def discover_result_dirs(roots):
-    """Find run roots and standalone legacy trajectory directories, without double counting."""
+    """Find run roots (directories with an evaluation manifest or metrics), without double counting."""
     found = set()
     for root in roots:
         root = Path(root).expanduser().resolve()
-        if any(part.startswith(("plots_old", "pdms_archive", "raw_archive", "summary_old")) for part in root.parts):
-            continue
         if not root.is_dir():
             continue
         for directory, dirs, files in os.walk(root):
-            dirs[:] = [d for d in dirs if d not in ("plots", "videos", "reasoning", "cots",
-                                                    "__pycache__", "pdms") and not d.startswith((".", "plots_old", "pdms_archive", "raw_archive", "summary_old"))]
+            dirs[:] = [d for d in dirs if d not in ("plots", "videos", "reasoning", "cots", "__pycache__", "pdms")
+                       and not d.startswith(".")]
             here = Path(directory)
             if "evaluation_manifest.json" in files or ("metrics" in dirs and any(
                     (here / "metrics" / name).is_file() for name in ("summary.json", "per_sample.json", "per_input.json"))):
@@ -40,9 +38,7 @@ def discover_result_dirs(roots):
                 continue
             if here.name == "metrics" and ("per_sample.json" in files or "per_input.json" in files):
                 found.add(here.parent)
-            if here.name in ("trajectories", "rollouts") and any(f.endswith(".npz") for f in files):
-                found.add(here.parent)
-    # A condition/legacy member belongs to its enclosing run. Distinct sibling runs survive.
+    # A condition member belongs to its enclosing run. Distinct sibling runs survive.
     return sorted(p for p in found if not any(parent in found for parent in p.parents))
 
 
@@ -160,8 +156,7 @@ def inventory_result(result_dir):
             for path in _archive_paths(root / condition):
                 expected.add(path.stem)
     if mode == "cot_swap":
-        for name in ("original_image_edited_cot", "edited_image_original_cot",
-                     "replay_original_image_original_cot", "replay_edited_image_edited_cot"):
+        for name in ("original_image_edited_cot", "edited_image_original_cot"):
             for path in _archive_paths(root / name):
                 expected.add(path.stem)
     if not expected:
@@ -193,7 +188,7 @@ def inventory_result(result_dir):
                                      row.get("provenance", {}).get("metadata_path")))
                 metadata_path = (_path(metadata_value, root) if metadata_value else
                                  run_dir / "metadata" / f"{token}.json" if run_dir else None)
-                motion = row.get("actor_motion", row.get("pedestrian_motion"))
+                motion = row.get("actor_motion")
                 if metadata_path and metadata_path.is_file() and dataset == "navsim":
                     from .actor_motion import inserted_actor_motion
                     metadata = read_json(metadata_path)
@@ -232,11 +227,9 @@ def inventory_result(result_dir):
                 task["primary_condition"] = "natural_edited"
                 task["pairs"] = {name: ["natural_original", name] for name in names if name != "natural_original"}
             elif mode == "cot_swap" or "original_image_original_cot" in row.get("conditions", {}):
-                conditions = {**row.get("conditions", {}), **row.get("replay_controls", {})}
+                conditions = row.get("conditions", {})
                 names = set(conditions) | {"original_image_original_cot", "edited_image_edited_cot",
                                           "original_image_edited_cot", "edited_image_original_cot"}
-                if summary.get("replay_controls_enabled"):
-                    names.update(("replay_original_image_original_cot", "replay_edited_image_edited_cot"))
                 for name in sorted(names):
                     value = conditions.get(name, {}).get("trajectory_path")
                     base = original_root if name == "original_image_original_cot" else root / name
@@ -266,9 +259,7 @@ def inventory_result(result_dir):
                 if "path" in source and not Path(source["path"]).is_file():
                     source["error"] = "Missing saved trajectory"
             if dataset == "navsim":
-                from .motion_bins import (
-                    NAVSIM_BIN_SPEC_ID, acceleration_bin_label, speed_bin_label,
-                )
+                from .motion_bins import acceleration_bin_label, speed_bin_label
                 groups = task["groups"]
                 speed = groups.get("speed_mps")
                 if speed is None:
@@ -277,10 +268,10 @@ def inventory_result(result_dir):
                 # Binning must not invalidate an otherwise scoreable trajectory.
                 try:
                     if speed is not None and "speed_bin_kmh" not in groups:
-                        groups["speed_bin_kmh"] = speed_bin_label(float(speed)*3.6, bin_spec=NAVSIM_BIN_SPEC_ID)
+                        groups["speed_bin_kmh"] = speed_bin_label(float(speed)*3.6)
                     acceleration = groups.get("longitudinal_acceleration_mps2")
                     if acceleration is not None and "acceleration_bin_mps2" not in groups:
-                        groups["acceleration_bin_mps2"] = acceleration_bin_label(acceleration, bin_spec=NAVSIM_BIN_SPEC_ID)
+                        groups["acceleration_bin_mps2"] = acceleration_bin_label(acceleration)
                 except ValueError as exc:
                     task["grouping_warning"] = str(exc)
             task.setdefault("status", "ready")

@@ -15,12 +15,12 @@ from scored runs, or from the released per-sample scores without running any mod
 
 | Path | Contents |
 |---|---|
-| `reactbench/compositing/` | NAVSIM and PAI-AV compositors (Blender), PCTNet harmonization (`harmonization/`, libcom 0.1.7) |
+| `reactbench/compositing/` | NAVSIM and PAI-AV compositors (`navsim/compositor/`, `paiav/compositor/`; Blender), scene classifiers, PCTNet harmonization (`harmonization/`, libcom 0.1.7) |
 | `reactbench/assets/` | Builders of the inserted objects: Rocketbox humans and animals, OpenX cars |
 | `reactbench/selection/` | ReactNAV, ReactTrain and real-scenes selection |
 | `reactbench/models/` | Runners: Alpamayo 1.5, Alpamayo 2, AutoVLA, ReCogDrive (+ real scenes), DriveWAM, SimWAM |
 | `reactbench/scoring/` | At-fault scoring of ReactNAV and ReactPAI pairs, braking feasibility |
-| `reactbench/analysis/` | CoT swap, fixed CoTs, CoT summary, attention knockout, GRPO exploration probe |
+| `reactbench/analysis/` | CoT swap and fixed CoTs (`cot/run_alpamayo1_5.py`, `cot/run_alpamayo2.py`), CoT summary, attention knockout, GRPO exploration probe |
 | `reactbench/summarize/` | All tables (`python -m reactbench.summarize`) |
 | `third_party/recogdrive/` | Modified ReCogDrive with its NAVSIM devkit (inference, scoring devkit, ReactTrain fine-tuning; `CHANGES.md`) |
 | `third_party/setup.sh` | Fetches the other models' code at the paper's commits and applies `third_party/patches/` |
@@ -45,16 +45,17 @@ from scored runs, or from the released per-sample scores without running any mod
 5. Data that the scorer and the real-scenes set read: the lane polygons of the navtest scenes
    (`outputs/work/navsim/lanes/`, released with the data, or
    `python -m reactbench.scoring.navsim_lanes --tokens-from outputs/annotations/reactnav.json --metric-cache <dir>`
-   on a NAVSIM v2 navtest metric cache) and the PAI-AV obstacle labels
-   (`python -m reactbench.datasets.paiav_obstacles --download`).
+   on a NAVSIM v2 navtest metric cache). The PAI-AV obstacle labels that the ReactPAI scorer reads come with the
+   ReactPAI download (below).
 
 ## Released data
 
 - ReactNAV edited images (CC BY-NC-SA 4.0, like nuPlan/OpenScene) and the ReCogDrive IL + RT checkpoint:
   `<release link>`. Unpack the images to `datasets/reactnav/`.
 - ReactPAI cannot be redistributed (PAI-AV licence). `data/reactpai/selection_manifest.json` lists the 1,045
-  clips; `python -m reactbench.datasets.download_reactpai` downloads their PAI-AV files and
-  `scripts/composite_paiav.sh` regenerates the 12 runs (below).
+  clips and the PAI-AV chunk files they are read from; `python -m reactbench.datasets.download_reactpai` downloads
+  only these clips' members of each chunk archive (cameras, LiDAR, egomotion, calibration, obstacle labels; about
+  470 GB, against ~10 TB for the whole archives) and `scripts/composite_paiav.sh` regenerates the 12 runs (below).
 - Per-sample scores of every run: `<release link>`; `REACTBENCH_OUTPUTS=<scores> python -m reactbench.summarize`
   prints all tables from them. `python -m reactbench.export DIR` writes such an export from your own outputs.
 
@@ -79,7 +80,7 @@ done
 
 The scene lists are fixed by `data/`;
 `python -m reactbench.selection.reactnav` documents and re-derives the ReactNAV list (the 3,696 placeable
-navtest scenes from `reactbench/compositing/navsim/classify_samples.py`, the 3,253 at 5-40 km/h, and the 3,228
+navtest scenes from `python -m reactbench.compositing.navsim.classify_samples`, the 3,253 at 5-40 km/h, and the 3,228
 without a rendering failure in any run).
 
 ### Evaluation (section 4)
@@ -104,12 +105,26 @@ done
 ```
 
 (add one `--original` call per model and dataset first; `scripts/` has no batch launcher because GPU queues
-differ). The CoT analysis runs on the ReactPAI runs at τ = 2.0 s: `--cot-swap` and `--fixed-cots` of the two
-Alpamayo ReactPAI runners, `python -m reactbench.analysis.cot.summary` and
-`python -m reactbench.analysis.cot.text_numbers` (numbers in the text). The attention knockout:
+differ).
+
+**Paired seeds.** The original and the edited scene of a pair share all random numbers: every runner derives
+its seeds from the scene token (`reactbench/models/seeds.py`: the first 63 bits of SHA-256 of
+`"<model namespace>:<base seed>:<token>"`). ReCogDrive, AutoVLA, DriveWAM and SimWAM are seeded by their runners
+before each rollout; Alpamayo 2 re-seeds at its diffusion sampler, because the CoT consumes a varying number of
+random draws; Alpamayo 1.5 takes its diffusion seed through `third_party/patches/alpamayo1.5.patch`.
+
+The CoT analysis (section 4.2 and appendix) runs on the ReactPAI runs at τ = 2.0 s and reuses the natural
+predictions above:
 
 ```bash
-python -m reactbench.analysis.knockout.run_alpamayo1_5     # 300 clips of data/knockout/tokens.json
+for model in alpamayo1_5 alpamayo2; do
+  for object in crossing_pedestrian standing_pedestrian car; do
+    python -m reactbench.analysis.cot.run_$model datasets/reactpai/${object}_timestep_20 --cot-swap
+    python -m reactbench.analysis.cot.run_$model datasets/reactpai/${object}_timestep_20 --fixed-cots
+  done
+done
+python -m reactbench.analysis.cot.summary                  # CoT summary (all look-ahead times)
+python -m reactbench.analysis.knockout.run_alpamayo1_5     # attention knockout: 300 clips of data/knockout/tokens.json
 python -m reactbench.analysis.knockout.run_alpamayo2
 python -m reactbench.analysis.knockout.analyze
 ```
@@ -147,6 +162,11 @@ generalization, sample statistics, unavoidable collisions, CoT swap, fixed CoTs,
 probe tables, and writes them to `outputs/summaries/`. All intervals are 95% percentile bootstrap intervals
 over scenes with 10,000 resamples. GPU numerics differ slightly between GPU models; the paper's runs used
 NVIDIA A100 and H100 GPUs.
+
+### Tests
+
+`python -m pytest tests` checks the at-fault scoring (contact detection and fault rules, against a slow
+reference implementation) and the ReactNAV and real-scenes selection, on CPU.
 
 ## Licences
 

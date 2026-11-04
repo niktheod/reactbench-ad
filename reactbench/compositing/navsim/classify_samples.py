@@ -26,8 +26,7 @@ import sys
 import time
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
 
-# Keep one native thread per worker even when this file is launched without the
-# Slurm wrapper.
+# Keep one native thread per worker process.
 for _thread_variable in (
     "OMP_NUM_THREADS",
     "MKL_NUM_THREADS",
@@ -43,15 +42,12 @@ import yaml
 
 HERE = Path(__file__).resolve().parent
 REPOSITORY_ROOT = HERE.parents[2]
-FAST_PIPELINE_ROOT = HERE
-RECOGDRIVE_ROOT = REPOSITORY_ROOT / "third_party" / "recogdrive"
-for _module_root in (FAST_PIPELINE_ROOT, RECOGDRIVE_ROOT):
-    _module_root_text = str(_module_root)
-    if _module_root_text not in sys.path:
-        sys.path.insert(0, _module_root_text)
+RECOGDRIVE_ROOT = REPOSITORY_ROOT / "third_party" / "recogdrive"  # NAVSIM devkit of the scene loader
+if str(RECOGDRIVE_ROOT) not in sys.path:
+    sys.path.insert(0, str(RECOGDRIVE_ROOT))
 
-import batch_composite_navsim_blender as fast  # noqa: E402
-import batch_composite_navsim_multi_trajectory as multi  # noqa: E402
+from . import batch_composite_navsim_multi_trajectory as multi  # noqa: E402
+from .compositor import engine as fast  # noqa: E402
 
 
 SCHEMA_VERSION = 2

@@ -33,6 +33,7 @@ CAMERA_NAMES = (
     "camera_cross_right_120fov",
     "camera_front_tele_30fov",
 )
+POSE_SEQUENCE = (24, 27, 30, 1)
 HISTORY_INTERVAL_US = 100_000
 HISTORY_FRAME_COUNT = 4
 ALPAMAYO_HISTORY_FRAME_COUNT = 16
@@ -46,7 +47,6 @@ VEHICLE_DIMENSION_FIELDS = (
     "wheelbase",
     "track_width",
 )
-POSE_SEQUENCE = (24, 27, 30, 1)
 LIDAR_NAME = "lidar_top_360fov"
 LOCAL_MAP_NAME = "pai-av-local"
 LIDAR_CACHE_VERSION = "paiav_lidar_per_point_egomotion_v2"
@@ -244,41 +244,6 @@ def _feature_file_source(value: Any, context: str) -> FeatureFileSource:
     return FeatureFileSource(relative_path, size_bytes)
 
 
-def _legacy_selection_manifest(path: Path, document: dict) -> SelectedClips:
-    selection = document.get("selection", {})
-    if not isinstance(selection, Mapping):
-        raise PAIAVDataError("Selection manifest has no selection object")
-    clip_ids = _manifest_clip_ids(
-        document.get("selected_clip_ids"),
-        selection.get("selected_clip_count"),
-        "Selection manifest",
-    )
-    required_cameras = set(selection.get("camera_features", []))
-    missing_cameras = sorted(set(CAMERA_NAMES) - required_cameras)
-    if missing_cameras:
-        raise PAIAVDataError(
-            f"Selection manifest does not require cameras: {missing_cameras}"
-        )
-    chunk_id = _chunk_id(selection.get("selected_chunk_id"), "Selection manifest")
-    raw_features = document.get("chunk_feature_files", {})
-    if not isinstance(raw_features, Mapping):
-        raise PAIAVDataError("Selection manifest chunk_feature_files must be an object")
-    feature_files = {
-        str(name): _feature_file_source(value, f"Feature {name!r}")
-        for name, value in raw_features.items()
-        if isinstance(name, str) and name
-    }
-    if len(feature_files) != len(raw_features):
-        raise PAIAVDataError("Selection-manifest feature names must be nonempty strings")
-    return SelectedClips(
-        path,
-        document,
-        clip_ids,
-        {clip_id: chunk_id for clip_id in clip_ids},
-        {chunk_id: ChunkSource(chunk_id, feature_files, len(clip_ids))},
-    )
-
-
 def _catalog_clip_chunk_ids(
     path: Path,
     document: dict,
@@ -430,11 +395,9 @@ def load_selection_manifest(path: Path) -> SelectedClips:
     if not isinstance(document, dict):
         raise PAIAVDataError("PAI-AV manifest must contain an object")
     role = document.get("document_role")
-    if role == "pai_av_clip_selection_manifest":
-        return _legacy_selection_manifest(path, document)
-    if role == "pai_av_dataset_manifest":
-        return _dataset_manifest(path, document)
-    raise PAIAVDataError(f"Unsupported PAI-AV manifest role in {path}: {role!r}")
+    if role != "pai_av_dataset_manifest":
+        raise PAIAVDataError(f"Unsupported PAI-AV manifest role in {path}: {role!r}")
+    return _dataset_manifest(path, document)
 
 
 def resolve_chunk_feature_paths(

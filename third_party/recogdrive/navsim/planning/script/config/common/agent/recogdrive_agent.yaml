@@ -15,7 +15,6 @@ sampling_method: 'ddim'
 cache_mode: False
 cache_hidden_state: True
 metric_cache_path: ''
-metric_cache_staging_path: null
 reference_policy_checkpoint: ''
 pdm_reward_workers: 1
 vlm_size: 'small'
@@ -75,5 +74,5 @@ cross_attention_head_dim: 128
 cross_attention_q_norm: false
 vlm_rope_theta: 1000000.0
 inference_precision: 32-true
-# Hazard SFT only: stage-2 objective returned per sample for cohort logs.
+# Kinematic SFT (ReactTrain) only: stage-2 objective returned per sample for cohort logs.
 per_sample_loss: false

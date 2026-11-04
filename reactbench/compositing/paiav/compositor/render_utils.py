@@ -396,10 +396,3 @@ def run_blender(
 def save_png(path: Path, array: np.ndarray) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     Image.fromarray(array).save(path, compress_level=3)
-
-
-if __name__ == "__main__":
-    raise SystemExit(
-        "This module now provides rendering utilities only. Use "
-        "python -m reactbench.compositing.paiav.edit with --timestep."
-    )

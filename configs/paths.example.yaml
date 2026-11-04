@@ -36,4 +36,3 @@ outputs: outputs                                          # predictions, scores,
 # navsim_devkit: third_party/recogdrive                   # NAVSIM devkit of the scorer
 # scoring_work: outputs/work/navsim                       # scorer caches; lanes/ holds the released lane polygons
 # scoring_work_paiav: outputs/work/paiav                  # ReactPAI scorer caches (recorded worlds)
-# paiav_obstacles: outputs/work/paiav/resources           # PAI-AV obstacle labels (reactbench.datasets.paiav_obstacles)

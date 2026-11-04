@@ -103,13 +103,13 @@ class AnimalMotionTests(unittest.TestCase):
     def test_unsupported_animal_metadata_is_rejected(self):
         walking = camel_metadata()
         walking["pedestrian_speed_mps"] = 1.4
-        dog_profile = camel_metadata()
-        dog_profile["asset"]["actor_geometry"]["profile_version"] = "quadruped_dog_geometry_v1"
+        unmeasured = camel_metadata()
+        unmeasured["asset"]["actor_geometry"]["profile_version"] = "quadruped_unmeasured_geometry_v1"
         wrong_asset = camel_metadata()
         wrong_asset["asset"]["id"] = "other"
         root_outside = camel_metadata()
         root_outside["asset"]["actor_geometry"]["local_bounds_m"]["y"] = [0.1, 3.0]
-        for metadata, message in ((walking, "Only standing"), (dog_profile, "profile_version"),
+        for metadata, message in ((walking, "Only standing"), (unmeasured, "profile_version"),
                                   (wrong_asset, "asset_id"), (root_outside, "root must lie inside")):
             with self.subTest(message=message), self.assertRaisesRegex(ValueError, message):
                 inserted_actor_motion(metadata)

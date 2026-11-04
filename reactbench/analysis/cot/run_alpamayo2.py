@@ -1,11 +1,14 @@
-"""Alpamayo 2 CoT-swap and fixed-CoT evaluation on PAI-AV and NAVSIM.
+"""Alpamayo 2 CoT interventions on ReactPAI (paper section 4.2 and appendix): CoT swap and fixed CoTs.
 
-Both modes build on completed natural runs from ``runner.py``: ``original/``
+    python -m reactbench.analysis.cot.run_alpamayo2 RUN_DIR --cot-swap     # O/E images x O/E CoTs
+    python -m reactbench.analysis.cot.run_alpamayo2 RUN_DIR --fixed-cots   # the five CoTs of fixed_cots.yaml
+
+Both modes build on completed natural runs of ``python -m reactbench.models.alpamayo2.eval_paiav``: ``original/``
 and the paired edited run, which must carry this configuration's exact cache
 signature (including the GPU architecture class) and source contracts. Their
 decoded reasoning is the CoT-swap donor text and their trajectories are the
 natural reference conditions. Forced rollouts reuse each token's natural text
-and diffusion seeds (``forced_cot.py``).
+and diffusion seeds (``models/alpamayo2/forced_cot.py``).
 
 Output layouts follow the Alpamayo 1.5 experiments, so the shared CPU scorers,
 inventories and plots apply unchanged: ``<run>_cot_swap/``
@@ -21,26 +24,26 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from ...analysis.cot.cot_swap import (
-    CROSSED_EDITED_IMAGE, CROSSED_ORIGINAL_IMAGE, FACTORIAL_CONDITIONS, NATURAL_EDITED,
-    NATURAL_ORIGINAL, REPLAY_CONDITIONS, REPLAY_EDITED, REPLAY_ORIGINAL, SavedCot,
-    aggregate_cot_swap_records, build_cot_swap_record, intervention_reasoning,
-)
 from ...io import read_json, write_json
-from ..common import predictions_dir
-from ..original_cache import _source_contract_identity, file_sha256, load_cached_trajectory
-from ...analysis.cot.fixed_cot import (
+from ...models.alpamayo2 import forced_cot, runner
+from ...models.alpamayo2.inference import paired_seed
+from ...models.common import predictions_dir
+from ...models.original_cache import _source_contract_identity, file_sha256, load_cached_trajectory
+from .cot_swap import (
+    CROSSED_EDITED_IMAGE, CROSSED_ORIGINAL_IMAGE, FACTORIAL_CONDITIONS, NATURAL_EDITED,
+    NATURAL_ORIGINAL, SavedCot, aggregate_cot_swap_records, build_cot_swap_record, intervention_reasoning,
+)
+from .fixed_cot import (
     BASELINE, CONDITIONS, ORIGINAL, SCHEMA_VERSION, ResumeConflict, aggregate, condition_metrics,
     contrast, digest, load_completed, load_config, object_type, prepare_manifest,
     resolve_conditions, save_json,
 )
-from ...analysis.cot.fixed_cot import add_arguments as add_fixed_cot_arguments
-from . import forced_cot, runner
-from .inference import paired_seed
+from .fixed_cot import add_arguments as add_fixed_cot_arguments
 
 
 DT, NATIVE_POSES, METRIC_POSES, METRIC_HORIZON_S = 0.1, 64, 40, 4.0
-COT_SWAP_SUFFIX, REPLAY_CONTROLS_SUFFIX, FIXED_COTS_SUFFIX = "_cot_swap", "_replay_controls", "_fixed_cots"
+COT_SWAP_SUFFIX, FIXED_COTS_SUFFIX = "_cot_swap", "_fixed_cots"
+DATASET = "pai-av"
 INTERVENTION = ("decoded donor CoT forced as the assistant prefix {cot}<|traj_future_start|>; "
                 "hidden states are recomputed with the selected image and the unchanged diffusion "
                 "expert reads the prompt KV cache")
@@ -52,12 +55,11 @@ class ModelInitializationError(RuntimeError):
     """Loading the model failed; no further sample can run."""
 
 
-def parse_args(dataset, argv=None):
-    parser = argparse.ArgumentParser(
-        description=f"Alpamayo2 {dataset} CoT-swap or fixed-CoT evaluation", allow_abbrev=False)
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("run_dir", type=Path)
-    parser.add_argument("--config", type=Path, default=runner.CONFIGS[dataset])
-    parser.add_argument("--dataset", default=runner.DATASET_FOLDERS[dataset], help="Dataset folder of the predictions")
+    parser.add_argument("--config", type=Path, default=runner.CONFIGS[DATASET])
+    parser.add_argument("--dataset", default=runner.DATASET_FOLDERS[DATASET], help="Dataset folder of the predictions")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--cot-swap", action="store_true",
                       help="Force each natural CoT onto the other image: original image with the edited "
@@ -71,14 +73,13 @@ def parse_args(dataset, argv=None):
     parser.add_argument("--edited-result-dir", type=Path,
                         help="Completed natural edited run (default: <results>/<input-parent>/<run>)")
     parser.add_argument("--scoring", choices=("score", "off"), default="score")
-    parser.add_argument("--scoring-workers", type=int, default=1)
     args = parser.parse_args(argv)
     if args.max_samples is not None and args.max_samples <= 0:
         parser.error("--max-samples must be positive")
     return args
 
 
-def natural_signatures(dataset, args, agent, loader, hardware, signature):
+def natural_signatures(signature):
     """Signatures a compatible natural run may carry: this configuration's."""
     return {"current": runner.jsonable(signature)}
 
@@ -222,7 +223,7 @@ def metric_poses(poses):
 
 
 def run_cot_swap(s):
-    agent, loader, replay = s.agent, s.loader, False
+    agent, loader = s.agent, s.loader
     natural = {"original": NaturalRun(s.original_dir, mode="original", signatures=s.natural_signatures,
                                       hardware_class=s.hardware["class"]),
                "edited": NaturalRun(s.edited_dir, mode="paired", signatures=s.natural_signatures,
@@ -277,8 +278,7 @@ def run_cot_swap(s):
         except OSError:
             pass
         raise
-    plan = (("original", ((CROSSED_ORIGINAL_IMAGE, "edited"),) + (((REPLAY_ORIGINAL, "original"),) if replay else ())),
-            ("edited", ((CROSSED_EDITED_IMAGE, "original"),) + (((REPLAY_EDITED, "edited"),) if replay else ())))
+    plan = (("original", ((CROSSED_ORIGINAL_IMAGE, "edited"),)), ("edited", ((CROSSED_EDITED_IMAGE, "original"),)))
     adapter = forced_cot.adapter_identity()
     records, successful = [], []
     for index, (token, sample) in enumerate(prepared.items(), 1):
@@ -312,16 +312,13 @@ def run_cot_swap(s):
                 write_json(reasoning_path, runner.jsonable(reasoning))
                 trajectories[condition] = poses
                 provenance[condition] = {
-                    "inference": ("forced_cot_token_replay_control" if condition in REPLAY_CONDITIONS
-                                  else "forced_cot_token_replay"),
+                    "inference": "forced_cot_token_replay",
                     "trajectory_path": str(trajectory_path), "reasoning_path": str(reasoning_path),
                     "donor_reasoning_path": str(donor.path), "donor_reasoning_sha256": donor.sha256}
             stage = "cot_swap_metrics"
             record = build_cot_swap_record(
                 token=token,
                 trajectories={name: metric_poses(trajectories[name]) for name in FACTORIAL_CONDITIONS},
-                replay_trajectories=({name: metric_poses(trajectories[name]) for name in REPLAY_CONDITIONS}
-                                     if replay else None),
                 actor_motion=context["actor_motion"], interval_length_s=DT, speed_mps=context["speed_mps"],
                 diffusion_seed=diffusion_seed,
                 longitudinal_acceleration_mps2=context.get("longitudinal_acceleration_mps2"),
@@ -350,9 +347,9 @@ def run_cot_swap(s):
         "evaluation_config_path": str(s.args.config.resolve()), "model_name_or_path": s.cfg["model_name_or_path"],
         "identity": {"signature": s.signature, **s.identity}, "forced_cot_adapter": adapter,
         "intervention": INTERVENTION,
-        "seed_policy": "each token's natural text and diffusion seeds, shared by all natural, crossed "
-                       "and replay conditions; diffusion noise is seeded at the sampler boundary",
-        "condition_order": list(FACTORIAL_CONDITIONS), "replay_controls_enabled": bool(replay),
+        "seed_policy": "each token's natural text and diffusion seeds, shared by all natural and crossed "
+                       "conditions; diffusion noise is seeded at the sampler boundary",
+        "condition_order": list(FACTORIAL_CONDITIONS),
         "interval_length_s": DT, "metric_horizon_s": METRIC_HORIZON_S, "native_pose_count": NATIVE_POSES,
         "input_contract": loader.camera_profile, "selected_token_count": len(s.tokens),
         "successful_token_count": len(records), "failed_sample_count": len({row["token"] for row in failures}),
@@ -374,7 +371,7 @@ def run_cot_swap(s):
         "schema_version": 1, "mode": "cot_swap", "signature": s.signature, "source_run_dir": str(s.run_dir),
         "selected_tokens": s.tokens, "successful_tokens": successful,
         "natural_runs": {name: run.status for name, run in natural.items()},
-        "replay_controls": bool(replay), "forced_cot_adapter": adapter}))
+        "forced_cot_adapter": adapter}))
     print(f"Saved {len(records)}/{len(s.tokens)} CoT-swap samples to {s.result_dir}; "
           f"{len(failures)} failures.", flush=True)
     return 0 if records else 1
@@ -536,8 +533,9 @@ def run_fixed_cots(s):
     return 0 if any(record["conditions"].keys() & set(CONDITIONS) for record in records) else 1
 
 
-def main(dataset, argv=None):
-    args = parse_args(dataset, argv)
+def main(argv=None):
+    dataset = DATASET
+    args = parse_args(argv)
     cfg, agent = runner.load_agent(dataset, args.config)
     run_dir = args.run_dir.expanduser().resolve()
     group = predictions_dir(runner.MODEL_NAME, args.dataset, "original").parent
@@ -557,13 +555,13 @@ def main(dataset, argv=None):
             dataset=dataset, args=args, cfg=cfg, agent=agent, loader=loader, run_dir=run_dir, tokens=tokens,
             hardware=hardware, identity=identity, signature=signature, result_dir=result_dir,
             original_dir=original_dir, edited_dir=edited_dir,
-            natural_signatures=natural_signatures(dataset, args, agent, loader, hardware, signature))
+            natural_signatures=natural_signatures(signature))
         status = run_cot_swap(setup) if args.cot_swap else run_fixed_cots(setup)
 
-    if dataset == "navsim":
-        from ...scoring.navsim import postprocess_evaluation
-        postprocess_evaluation(result_dir, args.scoring, args.scoring_workers)
-    else:
-        from ...scoring.paiav import postprocess_evaluation
-        postprocess_evaluation(result_dir, args.scoring)
+    from ...scoring.paiav import postprocess_evaluation
+    postprocess_evaluation(result_dir, args.scoring)
     return status
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -13,19 +13,13 @@ import json
 from pathlib import Path
 
 
+# Every original training sample, clean validation and the t3/t4 edits: the input of the training view.
 PROTOCOL = "recogdrive-original-plus-edits-v1"
-EDITED_ONLY_PROTOCOL = "recogdrive-edited-only-braking-v1"
-# Edited-only split plus every original training sample outside its held-out sources
-#; hazardous targets come from a frozen artifact.
-HAZARD_SFT_PROTOCOL = "recogdrive-hazard-sft-v1"
-HOLDOUT_PROTOCOLS = (EDITED_ONLY_PROTOCOL, HAZARD_SFT_PROTOCOL)
-# Criteria that rank each hazardous edit's GT speed variants: arms A-mj and A-pdms.
-HAZARD_TARGET_RANKINGS = ("minimum_jerk", "pdms")
-# Optional fixed subset of a hazard SFT view's originals, chosen once when the view is built.
+# Optional fixed subset of a kinematic SFT view's originals, chosen once when the view is built.
 ORIGINAL_POOL_SELECTION = "sha256(original-pool,seed,token)-ascending-v1"
 ORIGINAL_POOL_KEYS = {"selection", "seed", "count", "candidates", "candidates_sha256", "tokens_sha256"}
 # ReactTrain fine-tuning: clean validation, the selected t1-t4 edits of every
-# edited source (no held-out sources) and originals; hazardous targets come from a frozen kinematic artifact.
+# edited source and originals; hazardous targets come from a frozen kinematic artifact.
 KINEMATIC_SFT_PROTOCOL = "recogdrive-kinematic-sft-v1"
 SFT_ACTORS = ("car", "standing", "walking")
 KINEMATIC_SFT_TIMESTEPS = (1, 2, 3, 4)
@@ -34,9 +28,6 @@ TIMESTEP_PAIRS = ((1, 2), (1, 3), (1, 4), (2, 3), (2, 4), (3, 4))
 TIMESTEP_PAIR_SELECTION = "sha256(timestep-pairs,seed,actor,source)-ascending-round-robin-v1"
 VARIANT_SELECTION_KEYS = {"selection", "seed", "pairs", "edits_sha256"}
 KINEMATIC_TARGET_KEYS = {"path", "artifact_sha256", "settings"}
-# Training kinds of a kinematic SFT view. Ablation views record the sorted subset they keep as
-# ``training_kinds`` (always hazardous); views without the record keep all three.
-KINEMATIC_SFT_KINDS = ("benign", "hazardous", "original")
 # Threads for the I/O-bound file checks of validate_dataset.
 DATASET_CHECK_WORKERS = 32
 FEATURE_NAMES = ("internvl_feature.gz", "trajectory_target.gz")
@@ -129,74 +120,12 @@ def edit_key(token, sample, timesteps=(3, 4)):
     return key
 
 
-def validate_edited_only(value):
-    sources, heldout, split = value["original_sources"], value["heldout_samples"], value["holdout"]
-    tokens = split["source_tokens"]
-    if (type(split["seed"]) is not int or split["seed"] < 0 or type(split["count"]) is not int
-            or not 0 < split["count"] < len(sources) or len(tokens) != split["count"]
-            or tokens != sorted(set(tokens)) or not set(tokens) <= set(sources)):
-        raise ValueError("Invalid edited-only source holdout")
-    selected = sorted(sorted(sources, key=lambda t: (digest([split["seed"], t]), t))[:split["count"]])
-    if split.get("selection") != "sha256(seed,source)-ascending-v1" or tokens != selected:
-        raise ValueError("Edited-only holdout differs from its declared split seed")
-    if any(s.get("source_token") != token or s.get("kind") != "original" or s.get("split") != "train"
-           for token, s in sources.items()):
-        raise ValueError("Invalid edited-only original source identity")
-    train = {t: s for t, s in value["samples"].items() if s["split"] == "train"}
-    if any(s["kind"] == "original" for s in train.values()) or set(train) & set(heldout):
-        raise ValueError("Original/held-out inputs leaked into edited training")
-    groups = {}
-    for population, samples in (("train", train), ("holdout", heldout)):
-        for token, sample in samples.items():
-            source = sources.get(sample["source_token"], {})
-            if (source.get("kind") != "original" or source.get("split") != "train"
-                    or source.get("log_name") != sample["log_name"] or sample["split"] != "train"
-                    or (sample["source_token"] in tokens) != (population == "holdout")):
-                raise ValueError("Edited-only source/population mismatch")
-            groups.setdefault(sample["source_token"], set()).add((sample["kind"], edit_key(token, sample)))
-    expected = {(kind, f"{actor}_t{step}") for kind in ("hazardous", "benign")
-                for actor in ("car", "standing", "walking") for step in (3, 4)}
-    if set(groups) != set(sources) or any(keys != expected for keys in groups.values()):
-        raise ValueError("Every edited-only source requires all twelve variants")
-    expected_triplets = [{"source_token": source, "variant": f"{actor}_t{step}",
-                         "benign": f"{source}__benign_{actor}_t{step}",
-                         "hazardous": f"{source}__hazardous_{actor}_t{step}"}
-                        for source in tokens for actor in ("car", "standing", "walking") for step in (3, 4)]
-    if value["triplets"] != expected_triplets:
-        raise ValueError("Edited-only triplet pairing mismatch")
-
-
 def select_original_pool(candidates, count, seed):
     """The ``count`` candidate originals ranked first by sha256(original-pool, seed, token), sorted."""
     candidates = sorted(set(candidates))
     if type(count) is not int or type(seed) is not int or seed < 0 or not 0 < count <= len(candidates):
         raise ValueError("The original pool needs 0 < count <= candidates and a nonnegative integer seed")
     return sorted(sorted(candidates, key=lambda t: (digest(["original-pool", seed, t]), t))[:count])
-
-
-def validate_hazard_sft(value):
-    """The edited-only split plus original training samples outside its held-out sources.
-
-    Without ``original_pool`` the view holds every such original; with it, the recorded subset.
-    """
-    held = set(value["holdout"]["source_tokens"])
-    originals = {t for t, s in value["samples"].items() if s["split"] == "train" and s["kind"] == "original"}
-    if not originals or any(t in held or value["samples"][t]["source_token"] != t for t in originals):
-        raise ValueError("Hazard SFT originals must be training samples outside the held-out sources")
-    pool = value.get("original_pool")
-    if pool is not None and (
-            not isinstance(pool, dict) or set(pool) != ORIGINAL_POOL_KEYS
-            or pool["selection"] != ORIGINAL_POOL_SELECTION
-            or any(type(pool[k]) is not int for k in ("seed", "count", "candidates")) or pool["seed"] < 0
-            or not 0 < pool["count"] <= pool["candidates"] or pool["count"] != len(originals)
-            or pool["tokens_sha256"] != digest(sorted(originals))):
-        raise ValueError("Invalid hazard SFT original pool record")
-    validate_edited_only({**value, "samples": {t: s for t, s in value["samples"].items() if t not in originals}})
-    reference = value.get("hazard_targets")
-    if (not isinstance(reference, dict) or set(reference) != {"path", "artifact_sha256", "ranking"}
-            or reference["ranking"] not in HAZARD_TARGET_RANKINGS
-            or not any(r.get("path") == reference["path"] and "sha256" in r for r in value["sources"])):
-        raise ValueError("Hazard SFT manifests require their signed hazardous target artifact")
 
 
 def select_timestep_pairs(sources, seed):
@@ -213,29 +142,19 @@ def select_timestep_pairs(sources, seed):
     return selection
 
 
-def kinematic_sft_edits(sources, seed, kinds=("hazardous", "benign")):
-    """Sorted IDs of the selected edits: those of ``kinds`` (default hazardous and benign) of every
-    kept actor/timestep."""
+def kinematic_sft_edits(sources, seed):
+    """Sorted IDs of the selected edits: the hazardous and benign edit of every kept actor/timestep."""
     return sorted(f"{source}__{kind}_{actor}_t{step}"
                   for actor, pairs in select_timestep_pairs(sources, seed).items()
-                  for source, pair in pairs.items() for step in pair for kind in kinds)
+                  for source, pair in pairs.items() for step in pair for kind in ("hazardous", "benign"))
 
 
 def validate_kinematic_sft(value):
     """ReactTrain view: clean validation, the selected t1-t4 edits of every source and originals.
 
-    There are no held-out sources. Without ``original_pool`` the view holds every original training
-    sample; with it, the recorded subset. An ablation view's ``training_kinds`` drops the benign edits
-    of the selection and/or every original training sample (and the pool record).
+    Without ``original_pool`` the view holds every original training sample; with it, the recorded
+    subset.
     """
-    if any(key in value for key in ("heldout_samples", "holdout", "triplets")):
-        raise ValueError("Kinematic SFT views have no held-out sources")
-    kinds = list(KINEMATIC_SFT_KINDS)
-    if "training_kinds" in value:
-        kinds = value["training_kinds"]
-        if (not isinstance(kinds, list) or not all(isinstance(kind, str) for kind in kinds)
-                or kinds != sorted(set(kinds)) or "hazardous" not in kinds or not set(kinds) < set(KINEMATIC_SFT_KINDS)):
-            raise ValueError("Invalid kinematic SFT training kinds")
     sources, samples = value["original_sources"], value["samples"]
     if not sources or any(s.get("source_token") != token or s.get("kind") != "original" or s.get("split") != "train"
                           for token, s in sources.items()):
@@ -245,7 +164,7 @@ def validate_kinematic_sft(value):
             or selection["selection"] != TIMESTEP_PAIR_SELECTION or type(selection["seed"]) is not int
             or selection["seed"] < 0 or selection["pairs"] != [list(pair) for pair in TIMESTEP_PAIRS]):
         raise ValueError("Invalid kinematic SFT variant selection record")
-    expected = kinematic_sft_edits(sources, selection["seed"], [kind for kind in ("hazardous", "benign") if kind in kinds])
+    expected = kinematic_sft_edits(sources, selection["seed"])
     edits = sorted(token for token, sample in samples.items() if sample["kind"] != "original")
     if edits != expected or selection["edits_sha256"] != digest(expected):
         raise ValueError("Kinematic SFT edits differ from the declared timestep-pair selection")
@@ -255,20 +174,16 @@ def validate_kinematic_sft(value):
         if sample["split"] != "train" or sources[sample["source_token"]]["log_name"] != sample["log_name"]:
             raise ValueError(f"Kinematic SFT edit/source mismatch: {token}")
     originals = {t for t, s in samples.items() if s["split"] == "train" and s["kind"] == "original"}
-    if "original" not in kinds:
-        if originals or "original_pool" in value:
-            raise ValueError("Kinematic SFT views without originals hold no original training sample or pool")
-    else:
-        if not originals or any(samples[t]["source_token"] != t for t in originals):
-            raise ValueError("Kinematic SFT originals must be training samples")
-        pool = value.get("original_pool")
-        if pool is not None and (
-                not isinstance(pool, dict) or set(pool) != ORIGINAL_POOL_KEYS
-                or pool["selection"] != ORIGINAL_POOL_SELECTION
-                or any(type(pool[k]) is not int for k in ("seed", "count", "candidates")) or pool["seed"] < 0
-                or not 0 < pool["count"] <= pool["candidates"] or pool["count"] != len(originals)
-                or pool["tokens_sha256"] != digest(sorted(originals))):
-            raise ValueError("Invalid kinematic SFT original pool record")
+    if not originals or any(samples[t]["source_token"] != t for t in originals):
+        raise ValueError("Kinematic SFT originals must be training samples")
+    pool = value.get("original_pool")
+    if pool is not None and (
+            not isinstance(pool, dict) or set(pool) != ORIGINAL_POOL_KEYS
+            or pool["selection"] != ORIGINAL_POOL_SELECTION
+            or any(type(pool[k]) is not int for k in ("seed", "count", "candidates")) or pool["seed"] < 0
+            or not 0 < pool["count"] <= pool["candidates"] or pool["count"] != len(originals)
+            or pool["tokens_sha256"] != digest(sorted(originals))):
+        raise ValueError("Invalid kinematic SFT original pool record")
     reference = value.get("kinematic_targets")
     if (not isinstance(reference, dict) or set(reference) != KINEMATIC_TARGET_KEYS
             or not isinstance(reference["settings"], dict)
@@ -280,24 +195,15 @@ def load_manifest(path, *, verify_sources=True):
     path = Path(path).expanduser().resolve()
     value = json.loads(path.read_text())
     identity = value.pop("artifact_sha256", None)
-    if identity != digest(value) or value.get("protocol") not in (PROTOCOL, *HOLDOUT_PROTOCOLS, KINEMATIC_SFT_PROTOCOL):
+    if identity != digest(value) or value.get("protocol") not in (PROTOCOL, KINEMATIC_SFT_PROTOCOL):
         raise ValueError("Mixed-data manifest checksum/protocol mismatch")
-    edited_only = value["protocol"] == EDITED_ONLY_PROTOCOL
-    if edited_only:
-        validate_edited_only(value)
-    elif value["protocol"] == HAZARD_SFT_PROTOCOL:
-        validate_hazard_sft(value)
-    elif value["protocol"] == KINEMATIC_SFT_PROTOCOL:
+    # The training view keeps its edits' source originals apart from the (sampled) training originals.
+    view = value["protocol"] == KINEMATIC_SFT_PROTOCOL
+    if view:
         validate_kinematic_sft(value)
-    # These views keep their edits' source originals apart from the (sampled) training originals.
-    grouped = value["protocol"] in (*HOLDOUT_PROTOCOLS, KINEMATIC_SFT_PROTOCOL)
-    if value["counts"] != sample_counts(value["samples"], value["original_sources"] if grouped else None):
+    if value["counts"] != sample_counts(value["samples"], value["original_sources"] if view else None):
         raise ValueError("Mixed-data manifest counts do not match its samples")
-    if value["protocol"] == KINEMATIC_SFT_PROTOCOL and "training_kinds" in value:
-        # Ablation views (validated above): samples of every declared kind and, by the validation, of no other.
-        if any(not value["counts"][kind] for kind in value["training_kinds"]):
-            raise ValueError("Kinematic SFT ablation views require training samples of every declared kind")
-    elif (not edited_only and not value["counts"]["original"]) or not value["counts"]["hazardous"] or not value["counts"]["benign"]:
+    if not value["counts"]["original"] or not value["counts"]["hazardous"] or not value["counts"]["benign"]:
         raise ValueError("Mixed data requires original, hazardous and benign training samples")
     if verify_sources:
         for reference in value["sources"]:
@@ -306,7 +212,7 @@ def load_manifest(path, *, verify_sources=True):
 
 
 def validate_dataset(manifest, train_data, val_data, metric_paths, feature_root, metric_root):
-    """Validate what the actual loaders resolved, including held-out validation."""
+    """Validate what the actual loaders resolved, including the clean validation split."""
     if (str(Path(feature_root).resolve()) != manifest["feature_cache"] or
             str(Path(metric_root).resolve()) != manifest["metric_cache"]):
         raise ValueError("Mixed-data feature/metric cache roots differ from the manifest")

@@ -124,7 +124,6 @@ class GRPOConfig:
     gamma_denoising: float = 0.6
     
     metric_cache_path: str = "/path/to/metric_cache_train"
-    metric_cache_staging_path: Optional[str] = None
     reference_policy_checkpoint: str = "/path/to/IL_Model.ckpt"
     planner_initialization: Literal["stage2", "random"] = "stage2"
     pdm_reward_workers: int = 1
@@ -381,15 +380,7 @@ class ReCogDriveDiffusionPlanner(nn.Module):
         
         if cfg.pdm_reward_workers <= 0:
             raise ValueError("pdm_reward_workers must be a positive integer.")
-        metric_cache_staging_path = (
-            Path(cfg.metric_cache_staging_path)
-            if cfg.metric_cache_staging_path
-            else None
-        )
-        self.metric_cache_loader = MetricCacheLoader(
-            Path(cfg.metric_cache_path),
-            local_staging_path=metric_cache_staging_path,
-        )
+        self.metric_cache_loader = MetricCacheLoader(Path(cfg.metric_cache_path))
         self.pdm_reward_workers = cfg.pdm_reward_workers
         self._pdm_scorer_config = cfg.scorer_config
         self._pdm_proposal_sampling = TrajectorySampling(time_horizon=4, interval_length=0.1)
@@ -774,7 +765,6 @@ class ReCogDriveDiffusionPlanner(nn.Module):
         action_input: BatchFeature,
         init_actions: Optional[torch.Tensor] = None,
         deterministic: bool = False,
-        noise_seeds: Optional[List[int]] = None,
         vlm_conditioning=None,
     ) -> BatchFeature:
         """
@@ -807,21 +797,9 @@ class ReCogDriveDiffusionPlanner(nn.Module):
         B, D = vl_embeds.shape[0], self.config.action_dim
         device, dtype = vl_embeds.device, vl_embeds.dtype
         
-        # Independent CPU streams couple each source across edits, batches and ranks.
-        # Keep legacy global-RNG sampling byte-for-byte when no seeds are supplied.
-        generators = None
-        if noise_seeds is not None:
-            if len(noise_seeds) != B or any(type(s) is not int or not 0 <= s < 2**63 for s in noise_seeds):
-                raise ValueError("noise_seeds must contain one integer seed per trajectory")
-            generators = [torch.Generator(device="cpu").manual_seed(s) for s in noise_seeds]
-
-        def draw_noise():
-            if generators is None:
-                return torch.randn((B, self.config.action_horizon, D), device=device, dtype=dtype)
-            return torch.stack([torch.randn((self.config.action_horizon, D), generator=g,
-                                            dtype=torch.float32) for g in generators]).to(device=device, dtype=dtype)
-
-        current_actions = init_actions if init_actions is not None else draw_noise()
+        current_actions = init_actions if init_actions is not None else torch.randn(
+            (B, self.config.action_horizon, D), device=device, dtype=dtype
+        )
 
         if self.config.sampling_method == 'flow':
             dt = 1.0 / self.config.num_inference_steps
@@ -858,7 +836,7 @@ class ReCogDriveDiffusionPlanner(nn.Module):
                     **({"vlm_conditioning": vlm_conditioning} if vlm_conditioning is not None else {}),
                 )
 
-                noise_sample = torch.randn_like(current_actions) if generators is None else draw_noise()
+                noise_sample = torch.randn_like(current_actions)
                 std = torch.exp(0.5 * logvar)
 
                 std = std.to(dtype)
@@ -892,7 +870,7 @@ class ReCogDriveDiffusionPlanner(nn.Module):
 
                 std = std.to(dtype)
 
-                noise_sample = torch.randn_like(current_actions) if generators is None else draw_noise()
+                noise_sample = torch.randn_like(current_actions)
                 
                 if deterministic:
                     std.zero_()

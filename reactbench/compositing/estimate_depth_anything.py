@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Batch relative-depth inference for NAVSIM compositing.
+"""Batch relative-depth inference (Depth Anything V2) for the NAVSIM and PAI-AV compositors.
 
-This script intentionally runs in a separate, modern PyTorch environment. The
-main NAVSIM environment remains responsible for calibration and metric LiDAR
-alignment. Input is JSONL with ``input_path`` and ``output_path`` fields.
+This script runs in a separate, modern PyTorch environment; the compositor's own
+environment handles calibration and metric LiDAR alignment. Input is JSONL with
+``input_path`` and ``output_path`` fields.
 """
 
 from __future__ import annotations

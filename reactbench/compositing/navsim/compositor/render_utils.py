@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render the packed MakeHuman pedestrian into one calibrated NAVSIM sample."""
+"""Blender call, lens distortion and image utilities of the NAVSIM compositor (Rocketbox pedestrians, OpenX cars)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-import composite_navsim as geometry
+from . import geometry
 
 
 CAMERA_KEYS = geometry.CAMERA_KEYS
@@ -368,10 +368,3 @@ def run_blender(
 def save_png(path: Path, array: np.ndarray) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     Image.fromarray(array).save(path, compress_level=3)
-
-
-if __name__ == "__main__":
-    raise SystemExit(
-        "This module now provides rendering utilities only. Use "
-        "batch_composite_navsim_blender.py with --timestep."
-    )

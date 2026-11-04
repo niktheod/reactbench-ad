@@ -45,9 +45,8 @@ class NAVSIMRun:
         self.final_images_dir = self.run_dir / "final_images"
         if not self.final_images_dir.is_dir() or not (self.run_dir / "metadata").is_dir():
             raise ValueError("NAVSIM run must contain final_images/ and metadata/")
-        self.run_config_path = next((self.run_dir / name for name in
-            ("receiver_preview_config.json", "run_config.json") if (self.run_dir / name).is_file()), None)
-        if self.run_config_path is None:
+        self.run_config_path = self.run_dir / "run_config.json"
+        if not self.run_config_path.is_file():
             raise FileNotFoundError("Missing NAVSIM compositor run configuration")
         self.run_config = read_json(self.run_config_path)
         if not isinstance(self.run_config, dict):

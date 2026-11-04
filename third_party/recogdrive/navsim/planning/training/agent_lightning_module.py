@@ -1,10 +1,6 @@
 import pytorch_lightning as pl
 import torch
 import logging
-import math
-from pathlib import Path
-
-from omegaconf import OmegaConf
 
 from torch import Tensor
 from typing import Dict, Tuple,Any
@@ -13,30 +9,6 @@ from navsim.agents.abstract_agent import AbstractAgent
 from navsim.evaluate.raw_pdm_score import training_reward_protocol
 
 logger = logging.getLogger(__name__)
-
-
-def legacy_resume_bc_coeff(checkpoint_path):
-    """Recover BC from the original Hydra config, never from today's defaults."""
-    if checkpoint_path:
-        for parent in Path(checkpoint_path).expanduser().resolve().parents:
-            for relative in ("code/hydra/rank_0/config.yaml", "code/hydra/config.yaml", ".hydra/config.yaml"):
-                path = parent / relative
-                if not path.is_file():
-                    continue
-                config = OmegaConf.load(path)
-                agent = config.get("agent", {})
-                # A new config at a legacy run path may have been overwritten by
-                # Hydra during this launch. It is not evidence of the old BC setting.
-                if "planner_initialization" in agent or "bc_coeff" not in agent or OmegaConf.is_interpolation(agent, "bc_coeff"):
-                    raise ValueError(f"Legacy resume requires the original explicit agent.bc_coeff in {path}; "
-                                     "use a new output directory to preserve the original run configuration.")
-                value = agent["bc_coeff"]
-                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
-                    raise ValueError(f"Invalid legacy resume agent.bc_coeff in {path}")
-                logger.info("Legacy resume BC coefficient %s recovered from %s", value, path)
-                return float(value)
-    raise ValueError("Legacy resume requires the original run's Hydra config with agent.bc_coeff "
-                     "under code/hydra/rank_0, code/hydra, or .hydra beside the checkpoint's run directory.")
 
 
 class AgentLightningModule(pl.LightningModule):
@@ -156,7 +128,7 @@ class AgentLightningDiT(pl.LightningModule):
         ("base_infeasible_fraction", "base_infeasible", "scenes"),
         ("base_backward_fraction", "base_backward", "scenes"), ("loss", "loss_sum", "scenes"),
     )
-    # Hazard SFT: per-cohort mean of the per-sample stage-2 loss, and the sample count.
+    # Kinematic SFT: per-cohort mean of the per-sample stage-2 loss, and the sample count.
     SFT_COHORT_METRICS = ("sft_loss", "sft_sample_count")
 
     def __init__(self, agent: AbstractAgent, training_batch_size=None, training_sample_kinds=None):
@@ -341,7 +313,7 @@ class AgentLightningDiT(pl.LightningModule):
             self._log_reward_cohorts(totals, "epoch", self.SFT_COHORT_METRICS)
 
     def _sft_step(self, features, targets, tokens_list):
-        """Hazard SFT: the stage-2 objective on each sample's target,
+        """Kinematic SFT: the stage-2 objective on each sample's target,
         logged per cohort from globally reduced per-sample sums."""
         prediction = self.agent.forward(features, targets, tokens_list)
         loss = prediction["loss"]
@@ -513,16 +485,10 @@ class AgentLightningDiT(pl.LightningModule):
                     "Changing reward weights requires a new run."
                 )
         protocol = self._training_protocol()
-        if protocol is not None:
-            saved_protocol = checkpoint.get("stage3_training")
-            if saved_protocol is None:
-                if protocol["planner_initialization"] != "stage2":
-                    raise ValueError("Planner initialization differs on resume: legacy checkpoints are stage2 runs.")
-                saved_protocol = {"version": 1, "planner_initialization": "stage2",
-                                  "bc_coeff": legacy_resume_bc_coeff(getattr(self._trainer, "ckpt_path", None))}
-            if saved_protocol != protocol:
-                raise ValueError(f"Stage-3 initialization/BC settings differ on resume: "
-                                 f"saved={saved_protocol}, current={protocol}. Start a new run to change them.")
+        if protocol is not None and checkpoint.get("stage3_training") != protocol:
+            raise ValueError(f"Stage-3 initialization/BC settings differ on resume: "
+                             f"saved={checkpoint.get('stage3_training')}, current={protocol}. "
+                             "Start a new run to change them.")
         planner = getattr(self.agent, "action_head", None)
         if hasattr(planner, "joint_dropout_state"):
             joint = checkpoint.get("joint_motion_dropout")

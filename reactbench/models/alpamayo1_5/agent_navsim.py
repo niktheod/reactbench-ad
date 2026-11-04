@@ -14,7 +14,6 @@ import torch
 from PIL import Image
 
 from ... import paths
-from ...analysis.cot.cot_swap import forced_cot_prefix
 
 
 ALPAMAYO_REPO_ROOT = Path(
@@ -315,7 +314,7 @@ class AlpamayoAgent:
         device = torch.device(self.device)
         if device.type == "cuda" and not torch.cuda.is_available():
             raise RuntimeError(
-                "CUDA is unavailable. Run Alpamayo evaluation in a GPU Slurm job."
+                "Alpamayo evaluation requires a CUDA GPU."
             )
         if self.attn_implementation == "flash_attention_2":
             try:
@@ -351,12 +350,7 @@ class AlpamayoAgent:
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(self.seed)
 
-    def _make_model_input(
-        self,
-        agent_input: dict[str, Any],
-        *,
-        forced_cot: str | None = None,
-    ) -> dict[str, Any]:
+    def _make_model_input(self, agent_input: dict[str, Any]) -> dict[str, Any]:
         if self.processor is None or self.helper is None:
             raise RuntimeError("AlpamayoAgent.initialize() must be called first")
 
@@ -381,14 +375,6 @@ class AlpamayoAgent:
             num_frames_per_camera=self.frames_per_camera,
             nav_text=nav_text,
         )
-        if forced_cot is not None:
-            if not messages or messages[-1].get("role") != "assistant":
-                raise ValueError(
-                    "Alpamayo message template has no final assistant prefix"
-                )
-            messages[-1]["content"] = [
-                {"type": "text", "text": forced_cot_prefix(forced_cot)}
-            ]
         tokenized = self.processor.apply_chat_template(
             messages,
             tokenize=True,
@@ -409,12 +395,11 @@ class AlpamayoAgent:
         self,
         agent_input: dict[str, Any],
         *,
-        forced_cot: str | None = None,
         diffusion_seed: int | None = None,
     ) -> AlpamayoPrediction:
         if self.model is None or self.dtype is None:
             raise RuntimeError("AlpamayoAgent.initialize() must be called first")
-        model_input = self._make_model_input(agent_input, forced_cot=forced_cot)
+        model_input = self._make_model_input(agent_input)
         self._seed_all()
         diffusion_kwargs = dict(self.diffusion_kwargs)
         if diffusion_seed is not None:
@@ -434,15 +419,7 @@ class AlpamayoAgent:
                     top_k=self.top_k,
                     temperature=self.temperature,
                     num_traj_samples=self.num_traj_samples,
-                    max_generation_length=(
-                        # The forced prompt already ends in traj_future_start.
-                        # One throwaway generation step makes Transformers
-                        # return the complete prompt KV cache expected by the
-                        # unchanged Alpamayo diffusion code.
-                        1
-                        if forced_cot is not None
-                        else self.max_generation_length
-                    ),
+                    max_generation_length=self.max_generation_length,
                     diffusion_kwargs=diffusion_kwargs,
                     return_extra=True,
                 )

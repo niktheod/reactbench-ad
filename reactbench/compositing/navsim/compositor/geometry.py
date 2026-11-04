@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Calibrated, temporally consistent 3D compositing prototype for NAVSIM.
+"""Calibrated, temporally consistent 3D compositing geometry for NAVSIM.
 
 The actor trajectory is defined once in the current ego frame, transformed to
 global coordinates, and projected into every historical camera using the
@@ -359,10 +359,3 @@ def make_contact_sheet(paths: Dict[Tuple[int, str], Path], output_path: Path, ti
             draw.text((x + 5, y + 7), f"t{frame_idx - 3:+d}  {camera}", fill=(235, 235, 235))
     output_path.parent.mkdir(parents=True, exist_ok=True)
     sheet.save(output_path, quality=92)
-
-
-if __name__ == "__main__":
-    raise SystemExit(
-        "This module now provides geometry utilities only. Use "
-        "batch_composite_navsim_blender.py with --timestep."
-    )

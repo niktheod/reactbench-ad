@@ -44,7 +44,6 @@ class ReCogDriveAgent(AbstractAgent):
         lr_scheduler_epochs: int = 10,
         grpo: bool = False,
         metric_cache_path: Optional[str] = '', 
-        metric_cache_staging_path: Optional[str] = None,
         reference_policy_checkpoint: Optional[str] = '', 
         pdm_reward_workers: int = 1,
         vlm_size: Optional[str] = 'small', 
@@ -104,7 +103,7 @@ class ReCogDriveAgent(AbstractAgent):
         if conditioning_mode == "vlm_kv" and (len(self.vlm_kv_layers) != 8 or any(
                 type(i) is not int or not 0 <= i < 28 for i in self.vlm_kv_layers)):
             raise ValueError("Select eight VLM layers, each in [0, 27]")
-        # Hazard SFT: the same stage-2 objective, returned per sample.
+        # Kinematic SFT (ReactTrain): the same stage-2 objective, returned per sample.
         if type(per_sample_loss) is not bool:
             raise ValueError("per_sample_loss must be a boolean")
         if per_sample_loss and (grpo or conditioning_mode != "hidden_states" or mask_vlm_padding
@@ -158,7 +157,6 @@ class ReCogDriveAgent(AbstractAgent):
         self.training_ep_weight = float(training_ep_weight)
         self.backbone = None
         self.metric_cache_path = metric_cache_path
-        self.metric_cache_staging_path = metric_cache_staging_path
         self.reference_policy_checkpoint = reference_policy_checkpoint
         if pdm_reward_workers <= 0:
             raise ValueError("pdm_reward_workers must be a positive integer.")
@@ -223,7 +221,6 @@ class ReCogDriveAgent(AbstractAgent):
         if self.grpo:
             cfg.grpo_cfg.planner_initialization = self.planner_initialization
             cfg.grpo_cfg.metric_cache_path = self.metric_cache_path
-            cfg.grpo_cfg.metric_cache_staging_path = self.metric_cache_staging_path
             cfg.grpo_cfg.reference_policy_checkpoint = self.reference_policy_checkpoint
             cfg.grpo_cfg.pdm_reward_workers = self.pdm_reward_workers
             cfg.grpo_cfg.training_reward_mode = self.training_reward_mode
@@ -326,7 +323,7 @@ class ReCogDriveAgent(AbstractAgent):
             include_valid_mask=getattr(self, "mask_vlm_padding", False),
         )]
 
-    def forward(self, features: Dict[str, torch.Tensor], targets=None, tokens_list=None, *, inference_seeds=None) -> Dict[str, torch.Tensor]:
+    def forward(self, features: Dict[str, torch.Tensor], targets=None, tokens_list=None) -> Dict[str, torch.Tensor]:
         device = next(self.action_head.parameters()).device
         features = {key: tensor.to(device) if isinstance(tensor, torch.Tensor) and key != "image_path_tensor"
                     else tensor for key, tensor in features.items()}
@@ -450,8 +447,7 @@ class ReCogDriveAgent(AbstractAgent):
         else: 
             action_inputs = BatchFeature({"state": input_state.to(model_dtype), "his_traj": history_trajectory_reshaped.to(model_dtype), "status_feature": status_feature.to(model_dtype)})
             return self.action_head.get_action(last_hidden_state.to(model_dtype), action_inputs,
-                                               **conditioning_kwargs,
-                                               **({"noise_seeds": inference_seeds} if inference_seeds is not None else {}))
+                                               **conditioning_kwargs)
 
     def compute_trajectory(self, agent_input: AgentInput) -> Trajectory:
         self.eval()

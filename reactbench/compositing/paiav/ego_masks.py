@@ -7,7 +7,6 @@ import json
 import os
 from pathlib import Path
 import shutil
-import struct
 import tempfile
 import zipfile
 from functools import lru_cache
@@ -166,63 +165,6 @@ def validate_entry(path, identity):
         return metadata
     except (OSError, ValueError, KeyError, TypeError, RuntimeError):
         return None
-
-
-def extract_mesh(config):
-    """Extract only the hood from the external archive, preserving its world transform."""
-    from scipy.spatial.transform import Rotation
-    archive = Path(config['archive']).expanduser()  # the downloaded Sketchfab archive (only to re-extract the hood)
-    if file_sha256(archive) != config['archive_sha256']:
-        raise EgoMaskError(f'GLS archive hash mismatch: {archive}')
-    with zipfile.ZipFile(archive) as z:
-        data = z.read(config['member'])
-    if sha256(data) != config['member_sha256']:
-        raise EgoMaskError('GLS GLB member hash mismatch')
-    n, _ = struct.unpack_from('<II', data, 12)
-    document = json.loads(data[20:20+n])
-    binary_start = 20+n+8
-
-    def accessor(index):
-        a = document['accessors'][index]
-        view = document['bufferViews'][a['bufferView']]
-        dtype = np.dtype({5121: 'u1', 5123: '<u2', 5125: '<u4', 5126: '<f4'}[a['componentType']])
-        width = {'SCALAR': 1, 'VEC3': 3}[a['type']]
-        return np.ndarray((a['count'], width), dtype=dtype, buffer=data,
-                          offset=binary_start+view.get('byteOffset', 0)+a.get('byteOffset', 0),
-                          strides=(view.get('byteStride', dtype.itemsize*width), dtype.itemsize)).copy()
-
-    matches = [i for i, m in enumerate(document['meshes']) if m.get('name') == config['mesh_name']]
-    if matches != [config['mesh_index']]:
-        raise EgoMaskError('Unexpected hood mesh identity')
-    primitives = document['meshes'][matches[0]]['primitives']
-    if len(primitives) != 1:
-        raise EgoMaskError('Unexpected hood primitives')
-    vertices = accessor(primitives[0]['attributes']['POSITION']).astype(float)
-    faces = accessor(primitives[0]['indices']).astype(np.int32).reshape(-1, 3)
-    nodes = [i for i, n in enumerate(document['nodes']) if n.get('mesh') == matches[0]]
-    if len(nodes) != 1:
-        raise EgoMaskError('Unexpected hood instances')
-    parents = {child: i for i, n in enumerate(document['nodes']) for child in n.get('children', [])}
-    chain, j = [], nodes[0]
-    while True:
-        chain.append(j)
-        if j not in parents:
-            break
-        j = parents[j]
-    if chain != config['node_chain']:
-        raise EgoMaskError('Unexpected hood node transform chain')
-    matrix = np.eye(4)
-    for j in reversed(chain):
-        node = document['nodes'][j]
-        if 'matrix' in node:
-            transform = np.array(node['matrix']).reshape(4, 4).T
-        else:
-            transform = np.eye(4)
-            transform[:3, :3] = Rotation.from_quat(node.get('rotation', [0, 0, 0, 1])).as_matrix() @ np.diag(node.get('scale', [1, 1, 1]))
-            transform[:3, 3] = node.get('translation', [0, 0, 0])
-        matrix = matrix @ transform
-    world = vertices @ matrix[:3, :3].T + matrix[:3, 3]
-    return np.c_[world[:, 0], -world[:, 2], world[:, 1]], faces
 
 
 @lru_cache(maxsize=4)

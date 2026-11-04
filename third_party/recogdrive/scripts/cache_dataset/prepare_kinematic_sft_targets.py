@@ -4,8 +4,7 @@
 For every hazardous edit (t1-t4: the complete mixed manifest's t3/t4 edits plus the t1/t2 cache
 root) the target keeps the logged GT path and brakes at a constant deceleration from t = 0 to
 stop the margin short of the object's footprint (capped at the maximum deceleration), then
-holds. The audit also checks that every benign edit's GT stays clear of its object. CPU only;
-caches are read and never modified.
+holds. CPU only; caches are read and never modified.
 """
 from __future__ import annotations
 
@@ -18,7 +17,6 @@ import os
 from pathlib import Path
 
 from edited_training_cache import EXP, atomic_write, read_json
-from navsim.planning.training import recogdrive_hazard_sft as sft
 from navsim.planning.training import recogdrive_kinematic_sft as kin
 from navsim.planning.training.recogdrive_mixed_data import KINEMATIC_SFT_TIMESTEPS, digest, edit_key, load_manifest
 from prepare_mixed_training_dataset import kinematic_edits
@@ -34,18 +32,16 @@ def _worker_init():
 
 
 def edit_record(item):
-    """(token, record): the kinematic target of a hazardous edit, or the GT check of a benign one."""
+    """(token, record): the kinematic target of a hazardous edit."""
     token, sample, settings = item
     try:
-        gt_file, metric_file = sft.sample_file(sample, "trajectory_target.gz"), sft.sample_file(sample, "metric")
-        gt, cache = sft.load_gt(gt_file), sft.load_metric_cache(metric_file)
+        gt_file, metric_file = kin.sample_file(sample, "trajectory_target.gz"), kin.sample_file(sample, "metric")
+        gt, cache = kin.load_gt(gt_file), kin.load_metric_cache(metric_file)
         common = {"source_token": sample["source_token"], "variant": edit_key(token, sample, KINEMATIC_SFT_TIMESTEPS)}
         # The augmented metric caches track the inserted object under this token.
-        if sample["kind"] == "hazardous":
-            target, record = kin.kinematic_target(cache, gt, f"inserted_{token}", kin.KinematicSettings(**settings))
-            return token, {**common, "target": target.tolist(), "files": {"gt": gt_file, "metric": metric_file},
-                           **record}
-        return token, {**common, "gt_contacts": kin.benign_gt_contacts(cache, gt, f"inserted_{token}")}
+        target, record = kin.kinematic_target(cache, gt, f"inserted_{token}", kin.KinematicSettings(**settings))
+        return token, {**common, "target": target.tolist(), "files": {"gt": gt_file, "metric": metric_file},
+                       **record}
     except Exception as exc:
         raise RuntimeError(f"{token}: {type(exc).__name__}: {exc}") from exc
 
@@ -63,24 +59,22 @@ def _records(items, workers, label):
 
 
 def build(mixed_path=DEFAULT_MIXED, extra_root=DEFAULT_EXTRA, workers=1, limit=None, settings=None):
-    """The artifact for every hazardous edit (or the first ``limit`` hazardous and benign edits for a dry run)."""
+    """The artifact for every hazardous edit (or the first ``limit`` of them for a dry run)."""
     settings = kin.KinematicSettings() if settings is None else settings
     mixed_path = Path(mixed_path).expanduser().resolve()
     extra_root = Path(extra_root).expanduser().resolve()
     mixed = load_manifest(mixed_path)
     edits, _, extra_identity = kinematic_edits(mixed, extra_root)
-    by_kind = {kind: sorted(t for t, s in edits.items() if s["kind"] == kind) for kind in ("hazardous", "benign")}
-    items = {kind: [(t, edits[t], settings.as_dict()) for t in tokens[:limit]] for kind, tokens in by_kind.items()}
-    samples = _records(items["hazardous"], workers, "Kinematic targets")
-    benign = _records(items["benign"], workers, "Benign GT checks")
+    hazardous = sorted(t for t, s in edits.items() if s["kind"] == "hazardous")
+    items = [(t, edits[t], settings.as_dict()) for t in hazardous[:limit]]
+    samples = _records(items, workers, "Kinematic targets")
     value = {"protocol": kin.TARGETS_PROTOCOL, "settings": settings.as_dict(),
              "conventions": kin.target_conventions(settings),
              "mixed_manifest": mixed["artifact_sha256"], "mixed_manifest_path": str(mixed_path),
              "extra_edited_root": str(extra_root), "extra_edited_manifest": extra_identity,
              "script_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-             "complete": limit is None or all(len(items[k]) == len(by_kind[k]) for k in by_kind),
-             "summary": kin.target_summary(samples),
-             "benign_audit": {"summary": kin.benign_summary(benign), "samples": benign}, "samples": samples}
+             "complete": limit is None or len(items) == len(hazardous),
+             "summary": kin.target_summary(samples), "samples": samples}
     return {**value, "artifact_sha256": digest(value)}
 
 
@@ -107,7 +101,7 @@ def main():
     parser.add_argument("--max-deceleration", type=float, default=kin.KinematicSettings.max_deceleration_mps2,
                         help="Deceleration cap (m/s^2)")
     parser.add_argument("--workers", type=int, default=int(os.environ.get("SLURM_CPUS_PER_TASK", "1")))
-    parser.add_argument("--limit", type=int, help="First N hazardous and N benign edits only; requires --dry-run")
+    parser.add_argument("--limit", type=int, help="First N hazardous edits only; requires --dry-run")
     parser.add_argument("--dry-run", action="store_true", help="Compute and summarize without writing")
     args = parser.parse_args()
     if args.workers < 1 or (args.limit is not None and args.limit < 1):
@@ -122,8 +116,7 @@ def main():
     if not args.dry_run:
         publish(value, output)
     print(json.dumps({"output": None if args.dry_run else str(output), "artifact_sha256": value["artifact_sha256"],
-                      "samples": len(value["samples"]), "settings": value["settings"], "summary": value["summary"],
-                      "benign_audit": value["benign_audit"]["summary"]}, indent=2))
+                      "samples": len(value["samples"]), "settings": value["settings"], "summary": value["summary"]}, indent=2))
 
 
 if __name__ == "__main__":

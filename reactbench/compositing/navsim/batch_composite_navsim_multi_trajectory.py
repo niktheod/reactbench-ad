@@ -33,7 +33,7 @@ import numpy as np
 from PIL import Image
 import yaml
 
-import batch_composite_navsim_blender as fast
+from .compositor import engine as fast
 
 
 HERE = Path(__file__).resolve().parent
@@ -466,7 +466,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--asset-root",
         type=Path,
-        default=HERE / "blender_asset",
+        default=HERE / "compositor" / "blender_asset",
     )
     parser.add_argument("--max-samples", type=int)
     parser.add_argument("--render-batch-size", type=int, default=96)

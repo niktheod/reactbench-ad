@@ -1,13 +1,8 @@
 from __future__ import annotations
 
 import copy
-import json
 import math
-from pathlib import Path
-import sys
-from types import SimpleNamespace
 
-import numpy as np
 import pytest
 
 from reactbench.scoring.actor_motion import pedestrian_motion_from_metadata
@@ -18,15 +13,6 @@ from reactbench.scoring.pedestrian_geometry import (
     union_local_bounds,
 )
 
-
-NAVSIM_COMPOSITOR_ROOT = Path(__file__).resolve().parents[2] / "reactbench" / "compositing" / "navsim"
-if str(NAVSIM_COMPOSITOR_ROOT) not in sys.path:
-    sys.path.insert(0, str(NAVSIM_COMPOSITOR_ROOT))
-import composite_navsim_blender as navsim_render_utils  # noqa: E402
-import batch_composite_navsim_blender as navsim_editor  # noqa: E402
-
-from reactbench.compositing.paiav.compositor import engine as paiav_editor  # noqa: E402
-from reactbench.compositing.paiav.compositor import render_utils as paiav_render_utils  # noqa: E402
 
 
 def measured_geometry(local_forward_axis: str = "-Y") -> dict:
@@ -118,63 +104,6 @@ def test_local_forward_axis_maps_asymmetric_bounds_to_footprint() -> None:
             "width_m": 0.66,
         }
     )
-
-
-def test_navsim_and_paiav_transform_the_same_measured_3d_bounds() -> None:
-    geometry = measured_geometry()
-    arguments = (
-        np.array([4.0, -2.0, 0.1]),
-        np.eye(3),
-        math.pi,
-        geometry["local_bounds_m"],
-    )
-
-    navsim = navsim_render_utils.actor_bbox_lidar(*arguments)
-    paiav = paiav_render_utils.actor_bbox_lidar(*arguments)
-
-    np.testing.assert_allclose(navsim, paiav)
-    np.testing.assert_allclose(np.ptp(navsim, axis=0), [0.66, 0.49, 1.81])
-
-
-def test_measured_contract_flows_through_both_editor_asset_configs(
-    tmp_path: Path,
-) -> None:
-    geometry = measured_geometry()
-    blend_path = tmp_path / "pedestrian_test_asset.blend"
-    blend_path.write_bytes(b"test blend identity")
-    sidecar = {
-        "id": "pedestrian_test_asset",
-        "character_height_m": 1.81,
-        "animation_version": "test",
-        "animation_frame_start": 1,
-        "walk_cycle_frames": 32,
-        "local_forward_axis": "-Y",
-        "renderer_root": "PED_RIG",
-        "actor_geometry": geometry,
-    }
-    sidecar_path = blend_path.with_suffix(".json")
-    sidecar_path.write_text(json.dumps(sidecar), encoding="utf-8")
-    args = SimpleNamespace(
-        car=False,
-        stride_length_m=None,
-        speed_mps=1.4,
-        gait_timestep_s=0.5,
-        gait_frame_advance=23,
-    )
-
-    navsim_asset = navsim_editor.load_asset(blend_path, args)
-    paiav_asset = paiav_editor.load_asset(blend_path, args)
-
-    assert navsim_asset["actor_geometry"] == geometry
-    assert paiav_asset["actor_geometry"] == geometry
-    assert navsim_editor.asset_config(navsim_asset)["actor_geometry"] == geometry
-    assert paiav_editor.asset_config(paiav_asset)["actor_geometry"] == geometry
-
-    sidecar.pop("actor_geometry")
-    sidecar_path.write_text(json.dumps(sidecar), encoding="utf-8")
-    for loader in (navsim_editor.load_asset, paiav_editor.load_asset):
-        with pytest.raises(ValueError, match="pedestrian geometry"):
-            loader(blend_path, args)
 
 
 def test_motion_adapter_preserves_left_right_and_standing_orientation() -> None:

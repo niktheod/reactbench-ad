@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Build packed, standing-only Blender assets for Rocketbox animals.
 
-This is deliberately separate from ``create_rocketbox_animal_assets.py`` so
-the dog walk assets cannot change. Each asset keeps the source rest pose (a
+Each asset keeps the source rest pose (a
 four-leg stance) and holds it in a constant 32-frame action, so the
 compositor's asset contract (``animation_frame_start``/``walk_cycle_frames``)
 still holds. The sidecar records the grounded rest-pose bounds about the
@@ -44,7 +43,7 @@ MAX_GROUND_ERROR_M = 0.002
 MAX_CONTACT_HEIGHT_M = 0.05
 CONTACT_WEIGHT_THRESHOLD = 0.15
 # The quadruped contact renderer selects these deformation groups by side
-# token and name prefix (dog_blender_asset/scripts/render_batch.py).
+# token and name prefix (compositing/navsim/animal_blender_asset/scripts/render_batch.py).
 CONTACT_GROUPS = {
     "left_front": ("l", ("hand", "finger")),
     "right_front": ("r", ("hand", "finger")),

@@ -19,13 +19,6 @@ force_cache_computation: true
 seed: 0
 run_label: null
 
-# Reproduction remains the default. Validation mode requires frozen prepared inputs
-# and a baseline measured with validation/evaluate_checkpoints.py --baseline.
-checkpoint_selection: training_reward
-# Stage-3-specific defaults enable paired edited metrics independently of dropout.
-edited_validation: false
-validation_config: null
-
 use_deepspeed: True
 
 deepspeed:

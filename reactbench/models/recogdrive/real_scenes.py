@@ -31,6 +31,7 @@ from pathlib import Path
 import numpy as np
 
 from ... import paths
+from ..seeds import paired_seed
 
 ROOT = paths.outputs("real_scenes")
 PROTOCOL = "recogdrive-stopped-vehicle-probe-v2"
@@ -50,23 +51,12 @@ def run_dir(scenes, name):
     return ROOT / "runs" / Path(scenes).stem / name
 
 
+# Placement checks of the built scene file (``build``); ``hit`` and ``robust`` are recorded in it.
 CRITERIA = {
-    "version": 2, "headways_s": [1.5, 2.0], "half_corridor_m": 1.5, "max_ego_offset_m": 2.,
-    "max_ego_alignment_deg": 15.,
-    "pedestrian": {"gap_m": [5., 20.], "blockers": ["VEHICLE"], "keep": "robust hit at some headway"},
-    "stopped_vehicle": {"gap_m": [5., 10.], "max_ego_speed_mps": 1., "max_vehicle_speed_mps": .5,
-                        "first_in_path_of": ["VEHICLE", "PEDESTRIAN", "BICYCLE"], "path_m": 40.,
-                        "keep": "hit at some headway"},
-    "offpath_pedestrian": {"ahead_m": [5., 20.], "lateral_m": [2.5, 8.],
-                           "keep": "a non-reacting plan hits no object at any headway, speed factor or lateral "
-                                   "offset, and the route covers its reach"},
-    "gap": "route arc length from the ego front bumper to the target (centre for pedestrians, nearest "
-           "point inside the corridor for vehicles)",
+    "max_ego_offset_m": 2., "max_ego_alignment_deg": 15.,
     "hit": "non-reacting plan: constant v along the route centerline, ego footprint vs the recorded target "
            "box at 0.1 s steps over 4 s",
     "robust": {"speed_factors": [.8, 1., 1.2], "lateral_offsets_m": [-.5, 0., .5]},
-    "history": "t-1.5..t0 at v x 0.5 s spacing backwards along the route centerline (straight extension "
-               "before its start), rotated so the current pose is (0, 0, 0)",
 }
 
 HISTORY_TIMES_S = (-1.5, -1.0, -.5, 0.)
@@ -184,7 +174,7 @@ def load_scenes(paths):
                 headways = keys
             elif keys != headways:
                 raise ValueError("Every scene needs the same headways")
-            scenes.append({"split": "test", "group": "pedestrian", **scene})
+            scenes.append({"split": "test", **scene})
     tokens = [scene["token"] for scene in scenes]
     if not scenes or len(tokens) != len(set(tokens)):
         raise ValueError("Scene files must hold unique tokens")
@@ -483,7 +473,7 @@ def infer(args):
         print(f"{name}: loaded all {len(state)} planner weights from {path}", flush=True)
         for scene in scenes:
             token = scene["token"]
-            seed = evaluation.diffusion_seed_for_token(token, seed_base)
+            seed = paired_seed(evaluation.SEED_NAMESPACE, seed_base, token)
             for condition in conditions:
                 record = condition_annotation(annotations[token], scene, condition)
                 trajectory = evaluation.compute_trajectory_with_seed(

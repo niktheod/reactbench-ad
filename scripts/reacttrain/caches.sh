@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Caches of the ReactTrain fine-tuning under <reacttrain_work> (default outputs/reacttrain):
-#   original   navtrain VLM features (GPU, ~1 day on one GPU) and metric caches (CPU), each with its validator
+#   original   navtrain VLM features (GPU) and metric caches (CPU), each with its validator
 #   edited     VLM features (GPU) and metric caches with the inserted object (CPU) of the ReactTrain samples,
 #              for the timesteps 3/4 and 1/2 (the paper's two batches)
 #   scripts/reacttrain/caches.sh original|edited      (WORKERS: CPU workers, default 16)

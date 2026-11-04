@@ -3,7 +3,7 @@
 
 Run this through ``scripts/assets.sh humans``.
 The generated .blend/.json pairs are directly consumable by
-``reactbench/compositing/navsim/batch_composite_navsim_blender.py``.
+``reactbench/compositing/navsim/compositor/engine.py``.
 """
 
 from __future__ import annotations

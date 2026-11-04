@@ -3,11 +3,11 @@
 | Component | Version | Licence | Where | Use |
 |---|---|---|---|---|
 | ReCogDrive (with its NAVSIM devkit) | 37cd7b2, modified | Apache-2.0 | `third_party/recogdrive` (`CHANGES.md`) | ReCogDrive runs, NAVSIM devkit for scoring, ReactTrain fine-tuning |
-| libcom (PCTNet image harmonization) | 0.1.7, subset | Apache-2.0 | `reactbench/compositing/harmonization` | Harmonization of the composited object |
-| Alpamayo 1.5 | f42e594 + `patches/alpamayo1.5.patch` | see upstream | fetched by `third_party/setup.sh` | Evaluated model |
+| libcom (PCTNet image harmonization) | 0.1.7, subset, unmodified | Apache-2.0 | `reactbench/compositing/harmonization` | Harmonization of the composited object (PCTNet only; the copy also contains libcom's LBM model, unused, which `image_harmonization.py` imports at load time, hence `diffusers` in `envs/pctnet.yml`) |
+| Alpamayo 1.5 | f42e594 + `patches/alpamayo1.5.patch` | see upstream | fetched by `third_party/setup.sh` | Evaluated model. Patch: optional `diffusion_seed` for a dedicated generator of the initial diffusion noise (`flow_matching.py`; paired seeds) |
 | Alpamayo 2 | 5e7975f | see upstream | fetched | Evaluated model |
-| AutoVLA | ba34eed + `patches/AutoVLA.patch` | see upstream | fetched | Evaluated model |
-| DriveWAM | abbefb4 + `patches/DriveWAM.patch` | see upstream | fetched | Evaluated model |
+| AutoVLA | ba34eed + `patches/AutoVLA.patch` | see upstream | fetched | Evaluated model. Patch: Qwen2.5-VL loaded from the Hugging Face id, `attn_implementation="flash_attention_2"`, a check of the number of generated action tokens; `setup.sh` points the action codebook path at the checkout |
+| DriveWAM | abbefb4 + `patches/DriveWAM.patch` | see upstream | fetched | Evaluated model. Patch: nuplan-devkit pinned to its git tag (`environment.yml`); `src/modules/model.py` runs without `flash_attn` (optional import) and disables the cuDNN attention backend in the math-only SDPA context |
 | SimWAM | 1433ee7 | see upstream | fetched | Evaluated model |
 | Blender | 4.5.11 LTS | GPL-3.0-or-later | fetched | Rendering of the inserted objects |
 | Microsoft Rocketbox avatars and animals | 0943055 | MIT | built by `scripts/assets.sh` | Pedestrians and standing animals |

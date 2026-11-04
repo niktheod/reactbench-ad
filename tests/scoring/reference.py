@@ -9,10 +9,19 @@ from reactbench.scoring.geometry import (
     COLLISION_EPSILON_M, GEOMETRY_SAMPLE_INTERVAL_S, bounded_minimum, first_contact_time, footprint_signed_clearance,
     interpolate_trajectory_pose, trajectory_array, vehicle_footprint_corners,
 )
-from reactbench.scoring.navsim_metrics import score_prediction_any_contact
+from reactbench.scoring.collisions import score_raw_trajectory
+from reactbench.scoring.navsim_metrics import raw_dac
 
 
-score_prediction = score_prediction_any_contact
+def score_prediction(poses, interval_length_s, actor_motion, world):
+    """Physical contacts with any road user, not only at-fault ones (protocol V1), plus DAC; actor_motion=None
+    scores an unedited scene."""
+    collision = score_raw_trajectory(poses, actor_motion, world["geometry"], world,
+                                     interval_length_s=interval_length_s)
+    dac = raw_dac(poses, interval_length_s, world)
+    return {**collision, **dac, "nc_all": int(not collision["all"]), "nc_inserted": int(not collision["inserted"]),
+            "nc_dac": int(not collision["all"]) * dac["dac"] if dac["dac"] is not None else None,
+            "interval_length_s": interval_length_s}
 
 
 def evaluate_trajectory_geometry(

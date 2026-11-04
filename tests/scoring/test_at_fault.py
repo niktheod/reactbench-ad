@@ -206,17 +206,12 @@ class ReportingAndRecordTests(unittest.TestCase):
         self.assertEqual(summary["transition_tokens"]["nc_inserted"], {"improved": ["avoided"], "worsened": []})
 
     def test_new_sample_records_hold_no_metrics(self):
-        from reactbench.scoring.records import sample_record, visualization_title
-        record = sample_record(token="t", output_stem="t", speed_mps=5., actor_motion=motion(),
-                               original_trajectory=straight(1.), edited_trajectory=straight(2.), interval_length_s=.5)
+        from reactbench.scoring.records import sample_record
+        record = sample_record(token="t", output_stem="t", speed_mps=5., actor_motion=motion())
         legacy = {"ade_m", "original_collision", "edited_collision", "original_time_to_critical_s",
                   "original_minimum_clearance_m", "original_distance_driven_m", "distance_driven_drop_percentage"}
         self.assertFalse(legacy & set(record))
         self.assertEqual((record["speed_kmh"], record["actor_type"]), (18., "car"))
-        self.assertEqual(visualization_title(record, str), "Token t | 18.0 km/h")
-        legacy_record = {**record, "ade_m": .5, "original_time_to_collision_s": 1., "edited_time_to_collision_s": None}
-        self.assertEqual(visualization_title(legacy_record, lambda t: "none" if t is None else f"{t:.1f} s"),
-                         "Token t | 18.0 km/h | ADE 0.50 m | raw inserted contact original 1.0 s | edited none")
 
 
 if __name__ == "__main__":

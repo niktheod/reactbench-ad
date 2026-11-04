@@ -1,11 +1,12 @@
-"""Opt-in training behavior for the mixed-data experiment."""
+"""Update-count schedule of mixed-data training (ReactTrain fine-tuning): warm-up + per-update cosine LR,
+the recorded training protocol and the final epoch at the update limit."""
 import math
 
 import pytorch_lightning as pl
 
 
 def training_protocol(manifest, max_updates, *, batch_size, world_size, accumulation, warmup_updates=0,
-                      hazard_sft=None):
+                      kinematic_sft=None):
     if isinstance(max_updates, bool) or not isinstance(max_updates, int) or max_updates <= 0:
         raise ValueError("Mixed training requires a positive integer optimizer-update limit")
     if isinstance(warmup_updates, bool) or not isinstance(warmup_updates, int) or not 0 <= warmup_updates < max_updates:
@@ -15,8 +16,8 @@ def training_protocol(manifest, max_updates, *, batch_size, world_size, accumula
                 "batch_size": batch_size, "world_size": world_size, "accumulation": accumulation}
     if warmup_updates:  # absent when disabled, so earlier protocols stay unchanged
         protocol.update(scheduler="linear-warmup-cosine-per-optimizer-update-v1", warmup_updates=warmup_updates)
-    if hazard_sft is not None:  # hazard SFT only: sampled population, targets and loss
-        protocol["hazard_sft"] = hazard_sft
+    if kinematic_sft is not None:  # sampled population, targets and loss
+        protocol["kinematic_sft"] = kinematic_sft
     return protocol
 
 

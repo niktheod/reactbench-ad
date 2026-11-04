@@ -4,13 +4,13 @@ import argparse
 import json
 from pathlib import Path
 
-DEFAULT_SIDES = (Path(__file__).resolve().parent.parent / "classification_results"
-                 / "navtrain_benign_front25" / "navtrain_benign_sides.json")
+# The released sides of the ReactTrain benign edits.
+DEFAULT_SIDES = Path(__file__).resolve().parents[4] / "data" / "reacttrain" / "benign_sides.json"
 
 
 def add_arguments(parser):
     parser.add_argument("--benign-sides", type=Path, default=DEFAULT_SIDES,
-                        help="Classifier's token-to-side JSON; defaults to the full navtrain result.")
+                        help="Classifier's token-to-side JSON; defaults to data/reacttrain/benign_sides.json.")
 
 
 def configure(args, fast):

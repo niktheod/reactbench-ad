@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate and pack OpenX vehicles for the NAVSIM car compositor.
+"""Validate and pack OpenX vehicles for the NAVSIM and PAI-AV car compositors.
 
 Run this through ``scripts/assets.sh cars``.  Source assets
 are never modified.  Each prepared output preserves the source ``.xoma`` byte
@@ -380,7 +380,7 @@ def load_xoma(path: Path) -> dict[str, Any]:
     if abs(bounds["z"][0]) > 0.10:
         raise ValueError(f"Vehicle ground plane must be near local z=0 in {path}")
     if metadata.get("animated") is True:
-        raise ValueError(f"NAVSIM stationary-car assets cannot be marked animated: {path}")
+        raise ValueError(f"Stationary-car assets cannot be marked animated: {path}")
 
     vehicle_data = metadata.get("vehicleClassData")
     if not isinstance(vehicle_data, dict):

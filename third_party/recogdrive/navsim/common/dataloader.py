@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from pathlib import Path
 
 from tqdm import tqdm
 import pickle
 import lzma
-import shutil
-import tempfile
 
 from navsim.common.dataclasses import AgentInput, Scene, SceneFilter, SensorConfig
 from navsim.planning.metric_caching.metric_cache import MetricCache
@@ -172,25 +170,15 @@ class SceneLoader:
 class MetricCacheLoader:
     """Simple dataloader for metric cache."""
 
-    def __init__(
-        self,
-        cache_path: Path,
-        file_name: str = "metric_cache.pkl",
-        local_staging_path: Optional[Path] = None,
-    ):
+    def __init__(self, cache_path: Path, file_name: str = "metric_cache.pkl"):
         """
         Initializes the metric cache loader.
         :param cache_path: directory of cache folder
         :param file_name: file name of cached files, defaults to "metric_cache.pkl"
-        :param local_staging_path: optional node-local directory used to copy each
-            compressed cache file before decompression
         """
 
         self._file_name = file_name
         self.metric_cache_paths = self._load_metric_cache_paths(cache_path)
-        self._local_staging_path = local_staging_path
-        if self._local_staging_path is not None:
-            self._local_staging_path.mkdir(parents=True, exist_ok=True)
 
     def _load_metric_cache_paths(self, cache_path: Path) -> Dict[str, Path]:
         """
@@ -231,30 +219,8 @@ class MetricCacheLoader:
         :param token: unique identifier of scene
         :return: metric cache dataclass
         """
-        source_path = Path(self.metric_cache_paths[token])
-        if self._local_staging_path is None:
-            with lzma.open(source_path, "rb") as f:
-                metric_cache: MetricCache = pickle.load(f)
-            return metric_cache
-
-        # Keep staging bounded by the number of concurrent reads. A unique
-        # temporary file also makes this safe when several reward workers/ranks
-        # share the same node-local directory.
-        with tempfile.NamedTemporaryFile(
-            prefix="metric_cache_",
-            suffix=".pkl",
-            dir=self._local_staging_path,
-            delete=False,
-        ) as temporary_file:
-            staged_path = Path(temporary_file.name)
-
-        try:
-            shutil.copyfile(source_path, staged_path)
-            with lzma.open(staged_path, "rb") as f:
-                metric_cache = pickle.load(f)
-        finally:
-            staged_path.unlink(missing_ok=True)
-
+        with lzma.open(self.metric_cache_paths[token], "rb") as f:
+            metric_cache: MetricCache = pickle.load(f)
         return metric_cache
 
     def to_pickle(self, path: Path) -> None:

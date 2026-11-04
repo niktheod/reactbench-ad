@@ -49,19 +49,9 @@ def resolve_file(path: Path, label: str) -> Path:
 
 
 def load_run_config(run_dir: Path) -> tuple[Path, dict[str, Any]]:
-    config_candidates = tuple(
-        (run_dir / filename).expanduser().resolve()
-        for filename in ("receiver_preview_config.json", "run_config.json")
-    )
-    config_path = next(
-        (path for path in config_candidates if path.is_file()),
-        None,
-    )
-    if config_path is None:
-        expected = ", ".join(str(path) for path in config_candidates)
-        raise FileNotFoundError(
-            f"Run configuration does not exist; expected one of: {expected}"
-        )
+    config_path = (run_dir / "run_config.json").expanduser().resolve()
+    if not config_path.is_file():
+        raise FileNotFoundError(f"Run configuration does not exist: {config_path}")
     config = load_json(config_path)
     if not isinstance(config, dict):
         raise ValueError(f"Expected a JSON object in {config_path}")

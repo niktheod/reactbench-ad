@@ -10,7 +10,6 @@ configuration. The original and edited rollouts of a scene share all diffusion n
 from __future__ import annotations
 
 import argparse
-import hashlib
 import os
 import sys
 import traceback
@@ -22,8 +21,8 @@ import yaml
 
 from ...scoring.actor_motion import inserted_actor_motion
 from ...scoring.geometry import project_acceleration_onto_velocity
-from ...scoring.motion_bins import NAVSIM_BIN_SPEC_ID
 from ...scoring.records import run_summary, sample_record
+from ..seeds import paired_seed
 from ..common import (MAX_TORCH_SEED, annotations_path, current_speed_mps, discover_tokens, expand_config,
                       load_annotations_index,
                       load_json, load_run_config, predictions_dir, resolve_directory, resolve_edited_front_image,
@@ -35,21 +34,7 @@ CONFIG_DIR = Path(__file__).with_name("configs")
 VLM_TARGET = "reactbench.models.recogdrive.vlm_agent.ReCogDriveVLMAgent"
 
 
-def diffusion_seed_for_token(token: str, base_seed: int) -> int:
-    """Derive a stable diffusion seed shared by an original/edited pair."""
-
-    if not isinstance(token, str) or not token:
-        raise ValueError("token must be a non-empty string")
-    base_seed = int(base_seed)
-    if not 0 <= base_seed <= MAX_TORCH_SEED:
-        raise ValueError(
-            "base_seed must be between 0 and 2**63 - 1, "
-            f"got {base_seed}"
-        )
-
-    material = f"recogdrive-diffusion:{base_seed}:{token}".encode("utf-8")
-    digest = hashlib.sha256(material).digest()
-    return int.from_bytes(digest[:8], byteorder="big") >> 1
+SEED_NAMESPACE = "recogdrive-diffusion"  # per-token seeds: models/seeds.py
 
 
 def compute_trajectory_with_seed(agent: Any, agent_input: Any, seed: int) -> Any:
@@ -174,14 +159,13 @@ def main(argv=None) -> None:
     )
     selected_tokens = list(tokens)
     excluded_original_tokens: list[str] = []
-    cached_originals = {}
     if not args.original and is_vlm:
         # Unparseable VLM answers leave original gaps; evaluate the successful subset.
         cohort = validate_original_cache_cohort(original_result_dir, tokens=tokens, expected_signature=signature)
-        cached_originals, tokens = cohort.trajectories, cohort.eligible_tokens
-        excluded_original_tokens = cohort.excluded_failed_tokens
+        tokens, excluded_original_tokens = cohort.eligible_tokens, cohort.excluded_failed_tokens
     elif not args.original:
-        cached_originals = validate_original_cache(original_result_dir, tokens=tokens, expected_signature=signature)
+        # The original-scene predictions must exist for every token and match this configuration.
+        validate_original_cache(original_result_dir, tokens=tokens, expected_signature=signature)
 
     print(f"Evaluating {len(tokens)} {'original' if args.original else 'edited'} samples from {run_dir}", flush=True)
     agent.initialize()
@@ -194,7 +178,7 @@ def main(argv=None) -> None:
         response_path = result_dir / "responses" / f"{token}.json" if is_vlm else None
         try:
             if not is_vlm:
-                pair_seed = diffusion_seed_for_token(token, diffusion_seed_base)
+                pair_seed = paired_seed(SEED_NAMESPACE, diffusion_seed_base, token)
             if token not in annotations_by_token:
                 raise KeyError(f"Token {token!r} is absent from {annotations_file}")
             annotation = annotations_by_token[token]
@@ -209,16 +193,13 @@ def main(argv=None) -> None:
                 speed_mps = current_speed_mps(annotation)
                 acceleration = project_acceleration_onto_velocity(annotation["velocity"][-1], annotation["acceleration"][-1])
                 actor_motion, metadata_path = load_actor_motion(run_dir, token)
-                original_poses = cached_originals[token]
                 stage = "edited_inference"
                 trajectory = compute_prediction(agent, make_input(annotation, edited_image), pair_seed,
                                                 response_path=response_path)
-                edited_poses = save_prediction(trajectory_dir, token, trajectory, interval_length_s=interval_length_s)
+                save_prediction(trajectory_dir, token, trajectory, interval_length_s=interval_length_s)
                 stage = "metrics"
-                record = sample_record(bin_spec=NAVSIM_BIN_SPEC_ID, token=token, output_stem=token,
-                                       original_trajectory=original_poses, edited_trajectory=edited_poses,
-                                       actor_motion=actor_motion, interval_length_s=interval_length_s,
-                                       speed_mps=speed_mps, longitudinal_acceleration_mps2=acceleration)
+                record = sample_record(token=token, output_stem=token,
+                                       actor_motion=actor_motion, speed_mps=speed_mps, longitudinal_acceleration_mps2=acceleration)
                 record["placement_metadata_path"] = str(metadata_path)
                 if is_vlm:
                     record["response_path"] = str(response_path)

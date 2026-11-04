@@ -29,23 +29,12 @@ from PIL import Image
 from pyproj import Geod, Proj, Transformer
 import yaml
 
-import composite_navsim as geometry
-import composite_navsim_blender as render_utils
-import receiver_previews
-import benign_placements
-import front_visibility
-import benign_sides
+from . import benign_placements, benign_sides, front_visibility, geometry, render_utils
+from ... import edit_preparation, locations
+from ....scoring.pedestrian_geometry import normalize_pedestrian_geometry
 
 
 HERE = Path(__file__).resolve().parent
-REPO_ROOT = HERE.parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from reactbench.scoring.pedestrian_geometry import (  # noqa: E402
-    normalize_pedestrian_geometry,
-)
-from reactbench.compositing import edit_preparation, locations  # noqa: E402
 
 DEFAULT_BLENDER = locations.BLENDER
 # Runs are written to <output root>/<scene filter stem>/<run name>.
@@ -60,9 +49,6 @@ GROUNDING_METHOD = "strict_then_four_frame_best_effort_v1"
 # Removing that numerically insignificant tail prevents background pixels from
 # changing by one code value; the float catcher pass has its own threshold.
 MIN_COMPOSITE_ALPHA = 4
-LEGACY_RENDER_PIPELINE_VERSION = (
-    "photoreal_counterfactual_v18_external_direction_classifications"
-)
 RENDER_PIPELINE_VERSION = (
     "photoreal_counterfactual_v20_measured_pedestrian_geometry"
 )
@@ -75,7 +61,6 @@ BASE_RENDER_CORE_PASSES = (
 )
 BASE_RENDER_ACTOR_SUN_PASS = "actor_sun"
 BASE_RENDER_FULL_PASSES = (*BASE_RENDER_CORE_PASSES, BASE_RENDER_ACTOR_SUN_PASS)
-DIRECTIONAL_RENDER_PASSES = ("actor_sun", "directional_shadow")
 FUTURE_TIMESTEP_PLACEMENT_VERSION = (
     "future_ego_front_bumper_timed_interception_v2"
 )
@@ -115,7 +100,6 @@ DIRECTION_CLASSIFICATION_ALLOWED_LABELS = {
 }
 PREVIEW_PLACEMENT_FLOAT_ATOL = 1e-9
 RAW_RENDER_STORAGE_VERSION = "cropped_render_region_v1"
-LEGACY_FINALIZATION_CACHE_VERSION = "label_independent_sensor_intermediates_v1"
 FINALIZATION_CACHE_VERSION = "label_independent_sensor_intermediates_v2"
 RENDER_REGION_PADDING_PX = 256
 RENDER_REGION_ALIGNMENT_PX = 8
@@ -156,19 +140,6 @@ SHADOW_LABEL_COUNTERFACTUAL_SUN_ENERGY = 2.0
 DIRECTIONAL_SHADOW_RECOVERY_VERSION = (
     "gated_local_receiver_depth_bias_v1"
 )
-# Recovery is deliberately anomaly-only. A requested directional catcher must
-# be both strong and almost entirely attenuated by the existing receiver mask
-# before any alternate depth interpretation is considered.
-DIRECTIONAL_SHADOW_COLLAPSE_MIN_RAW_MAX = 0.50
-DIRECTIONAL_SHADOW_COLLAPSE_MAX_RETAINED_RATIO = 0.20
-DIRECTIONAL_SHADOW_COLLAPSE_MIN_FOOTPRINT_PIXELS = 16
-DIRECTIONAL_SHADOW_RECOVERY_MIN_RETAINED_RATIO = 0.50
-DIRECTIONAL_SHADOW_LOCAL_REFERENCE_MIN_PIXELS = 128
-DIRECTIONAL_SHADOW_LOCAL_REFERENCE_BASE_MAX_MAD_M = 0.75
-DIRECTIONAL_SHADOW_LOCAL_REFERENCE_MAX_MAD_DEPTH_FRACTION = 0.05
-DIRECTIONAL_SHADOW_LOCAL_BAND_X_ACTOR_HEIGHT = 0.50
-DIRECTIONAL_SHADOW_LOCAL_BAND_Y_ABOVE_ACTOR_HEIGHT = 0.08
-DIRECTIONAL_SHADOW_LOCAL_BAND_Y_BELOW_ACTOR_HEIGHT = 0.16
 SHADOW_LABEL_DIRECTIONAL_GAINS = {
     "contact_only": 0.0,
     "medium": 0.35,
@@ -198,17 +169,6 @@ SHADOW_LABEL_SUN_ANGLES_DEGREES = {
     "medium": 1.0,
     "hard": 0.53,
 }
-SHADOW_LABEL_DIRECT_SUNLIGHT_CONDITIONS = {
-    "no_direct_sunlight",
-    "moderate_direct_sunlight",
-    "clear_direct_sunlight",
-}
-SHADOW_LABEL_DIRECT_SUNLIGHT_PRESETS = {
-    "no_direct_sunlight": {"strength": "contact_only", "softness": "soft"},
-    "moderate_direct_sunlight": {"strength": "medium", "softness": "medium"},
-    "clear_direct_sunlight": {"strength": "strong", "softness": "hard"},
-}
-SHADOW_LABEL_RECEIVER_VISIBILITY = {"shaded", "lit"}
 WGS84_GEOD = Geod(ellps="WGS84")
 MAP_UTM_CRS = {
     "us-ma-boston": "EPSG:32619",
@@ -390,7 +350,7 @@ def parse_args(argv=None) -> argparse.Namespace:
         action="store_true",
         help=(
             "Insert a stationary OpenX/XOMA car whose rear bumper first "
-            "contacts the future ego front bumper. Requires --contact-only."
+            "contacts the future ego front bumper."
         ),
     )
     parser.set_defaults(speed_mps=PEDESTRIAN_SPEED_MPS)
@@ -425,33 +385,6 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--disable-motion-blur", action="store_true")
     parser.add_argument("--device", choices=("auto", "gpu", "cpu"), default="auto")
     parser.add_argument("--harmonization-strength", type=float, default=0.65)
-    output_mode = parser.add_mutually_exclusive_group(required=True)
-    output_mode.add_argument(
-        "--preview",
-        action="store_true",
-        help=(
-            "Project a calibrated receiver/stance marker onto one original "
-            "camera image per visible timestep without launching Blender."
-        ),
-    )
-    output_mode.add_argument(
-        "--shadow-labels",
-        type=Path,
-        help=(
-            "Finalize standard images from receiver-marker VLM decisions in "
-            "shadow_labels.json. Each timestep recommendation is shared by all "
-            "synchronized cameras."
-        ),
-    )
-    output_mode.add_argument(
-        "--contact-only",
-        action="store_true",
-        help=(
-            "Finalize every selected actor with the uniform contact-only "
-            "shadow policy. This mode does not require receiver previews or a "
-            "shadow-label document."
-        ),
-    )
     parser.add_argument(
         "--depth-python",
         type=Path,
@@ -538,8 +471,6 @@ def validate_actor_mode(args: argparse.Namespace) -> None:
         benign_placements.configuration(args)
         if getattr(args, "disable_collision_check", False):
             raise ValueError("Benign placement requires collision checks")
-    if getattr(args, "car", False) and not getattr(args, "contact_only", False):
-        raise ValueError("--car currently requires --contact-only")
 
 
 def jsonable(value: Any) -> Any:
@@ -704,23 +635,8 @@ def render_storage_ideal_origin(manifest: dict) -> Tuple[float, float]:
     return overscan_x + x_min, overscan_y + y_min
 
 
-def expected_timestep_shadow_recommendation(
-    direct_sunlight_condition: str,
-    receiver_visibility: str,
-) -> dict:
-    """Map receiver-label observations to a deterministic shadow preset."""
-    if (
-        direct_sunlight_condition == "no_direct_sunlight"
-        or receiver_visibility == "shaded"
-    ):
-        return {"strength": "contact_only", "softness": "soft"}
-    return dict(
-        SHADOW_LABEL_DIRECT_SUNLIGHT_PRESETS[direct_sunlight_condition]
-    )
-
-
 def contact_only_shadow_label() -> dict:
-    """Return the auditable synthetic decision used by --contact-only."""
+    """The shadow decision of the contact-only policy, recorded with every view."""
     return {
         "scene_decision": {
             "direct_sunlight_condition": None,
@@ -749,57 +665,10 @@ def contact_only_shadow_metadata() -> dict:
     return {
         "document_role": "uniform_contact_only_shadow_policy",
         "decision_policy": CONTACT_ONLY_SHADOW_POLICY_VERSION,
-        "source": "--contact-only",
+        "source": "fixed_contact_only_policy",
         "scope": "all_selected_tokens_timesteps_and_cameras",
         "sha256": None,
     }
-
-
-def uses_shadow_composition(args: argparse.Namespace) -> bool:
-    return (
-        getattr(args, "shadow_labels", None) is not None
-        or bool(getattr(args, "contact_only", False))
-    )
-
-
-def shadow_decision_source(
-    args: argparse.Namespace,
-    label: Optional[dict] = None,
-) -> str:
-    if getattr(args, "contact_only", False):
-        return CONTACT_ONLY_SHADOW_POLICY_VERSION
-    if isinstance(label, dict):
-        source = label.get("decision_source")
-        if isinstance(source, str) and source:
-            return source
-    return "vlm_shared_per_token_timestep"
-
-
-def shadow_decision_policy(args: argparse.Namespace) -> str:
-    if getattr(args, "contact_only", False):
-        return "apply_uniform_contact_only_to_all_selected_views"
-    return (
-        "use_each_token_timestep_recommendation_for_all_"
-        "synchronized_cameras_without_smoothing"
-    )
-
-
-def shadow_label_for(
-    args: argparse.Namespace,
-    token: str,
-    camera: str,
-    frame_index: int,
-) -> Optional[dict]:
-    if getattr(args, "contact_only", False):
-        return contact_only_shadow_label()
-    lookup = getattr(args, "shadow_label_lookup", None)
-    if lookup is None:
-        return None
-    # The semantic decision describes one physical actor position and is shared
-    # across synchronized cameras. Camera remains in the signature because the
-    # surrounding render/finalization code is intentionally camera-specific.
-    _ = camera
-    return lookup.get((token, int(frame_index)))
 
 
 def preview_placement_mismatch(
@@ -910,37 +779,6 @@ def preview_placement_mismatch(
     if preview_value != current_value:
         return f"{path}: value differs ({preview_value!r} != {current_value!r})"
     return None
-
-
-def validate_preview_placement(
-    args: argparse.Namespace,
-    token: str,
-    placement: dict,
-) -> None:
-    """Require final geometry to match the placement used for preview labels."""
-    lookup = getattr(args, "shadow_label_lookup", None)
-    if lookup is None:
-        return
-    preview_placement = next(
-        (
-            record.get("placement")
-            for frame_index in range(4)
-            if (record := lookup.get((token, frame_index))) is not None
-        ),
-        None,
-    )
-    if preview_placement is None:
-        raise TokenFailure(
-            "missing_preview_placement",
-            "shadow labels do not include receiver-preview placement provenance",
-        )
-    mismatch = preview_placement_mismatch(preview_placement, placement)
-    if mismatch is not None:
-        raise TokenFailure(
-            "preview_final_placement_mismatch",
-            "current placement differs from the labeled receiver preview: "
-            f"{mismatch}",
-        )
 
 
 def shadow_label_render_policy(label: dict) -> dict:
@@ -3105,8 +2943,7 @@ def stationary_vehicle_collision_diagnostics(
 def trajectory_collision_diagnostics(
     points: np.ndarray,
     plane: np.ndarray,
-    trajectory_xy_or_longitudinal: Any,
-    lateral_positions: Optional[Sequence[float]] = None,
+    trajectory_xy: Any,
     *,
     actor_basis_lidar: np.ndarray,
     actor_heading: float,
@@ -3117,22 +2954,9 @@ def trajectory_collision_diagnostics(
     The trajectory is sampled more densely than the four image timestamps so a
     narrow pole or parked object between two recorded actor positions is not
     skipped. Sparse returns are treated conservatively: at least five points
-    must support an obstruction before the token is flagged for review. The
-    legacy constant-X signature remains accepted for the standalone checker.
+    must support an obstruction before the token is flagged for review.
     """
-    if lateral_positions is not None:
-        longitudinal_x = float(trajectory_xy_or_longitudinal)
-        trajectory_xy = np.asarray(
-            [
-                [longitudinal_x, float(lateral)]
-                for lateral in lateral_positions
-            ],
-            dtype=np.float64,
-        )
-    else:
-        trajectory_xy = np.asarray(
-            trajectory_xy_or_longitudinal, dtype=np.float64
-        )
+    trajectory_xy = np.asarray(trajectory_xy, dtype=np.float64)
     if (
         trajectory_xy.ndim != 2
         or trajectory_xy.shape[1] != 2
@@ -4011,34 +3835,15 @@ def cache_matches(
         return False
 
 
-def base_render_required_passes(
-    shadow_label_policy: Optional[dict],
-) -> Tuple[str, ...]:
-    """Return only the base passes consumed by the selected shadow policy."""
-    if (
-        shadow_label_policy is not None
-        and shadow_label_policy.get("requires_directional_render") is True
-    ):
-        return BASE_RENDER_CORE_PASSES
-    return BASE_RENDER_FULL_PASSES
-
-
 def render_manifest_passes(manifest: dict, field: str) -> Tuple[str, ...]:
-    """Read an explicit pass set, interpreting v18 manifests as full caches."""
+    """Read the explicit pass set of a base render manifest."""
     if field not in {"required_passes", "produced_passes"}:
         raise ValueError(f"Unsupported render pass field: {field}")
     render_mode = str(manifest.get("render_mode", ""))
-    allowed = {
-        "base": BASE_RENDER_FULL_PASSES,
-        "directional_only": DIRECTIONAL_RENDER_PASSES,
-    }.get(render_mode)
-    if allowed is None:
+    if render_mode != "base":
         raise ValueError(f"Unsupported render_mode for pass manifest: {render_mode!r}")
+    allowed = BASE_RENDER_FULL_PASSES
     value = manifest.get(field)
-    if value is None:
-        # Before v19 every base job emitted all three base Cycles passes and
-        # every directional job emitted its Sun actor and catcher together.
-        return tuple(allowed)
     if (
         not isinstance(value, list)
         or any(not isinstance(item, str) for item in value)
@@ -4059,27 +3864,13 @@ def required_render_paths(
 
 
 def _pass_aware_render_manifests_match(existing: dict, current: dict) -> bool:
-    """Allow only the audited v18-to-v19 pass-set cache migration."""
-    modes = {"base", "directional_only"}
-    if existing.get("render_mode") not in modes or current.get("render_mode") not in modes:
+    """A cached base render whose passes cover the current request."""
+    if existing.get("render_mode") != "base" or current.get("render_mode") != "base":
         return False
-    existing_version = existing.get("render_pipeline_version")
-    current_version = current.get("render_pipeline_version")
-    if not (
-        existing_version == current_version == RENDER_PIPELINE_VERSION
-        or (
-            existing_version == LEGACY_RENDER_PIPELINE_VERSION
-            and current_version == RENDER_PIPELINE_VERSION
-        )
-    ):
+    if not existing.get("render_pipeline_version") == current.get("render_pipeline_version") == RENDER_PIPELINE_VERSION:
         return False
-    if current.get("render_pass_policy_version") != BASE_RENDER_PASS_POLICY_VERSION:
-        return False
-    if (
-        existing_version == RENDER_PIPELINE_VERSION
-        and existing.get("render_pass_policy_version")
-        != BASE_RENDER_PASS_POLICY_VERSION
-    ):
+    if (current.get("render_pass_policy_version") != BASE_RENDER_PASS_POLICY_VERSION
+            or existing.get("render_pass_policy_version") != BASE_RENDER_PASS_POLICY_VERSION):
         return False
     try:
         required = set(render_manifest_passes(current, "required_passes"))
@@ -4134,7 +3925,7 @@ def compatible_render_cache_key(
                 and existing_key
                 and (
                     pass_aware_match
-                    or existing.get("render_mode") not in {"base", "directional_only"}
+                    or existing.get("render_mode") != "base"
                 )
                 and preview_placement_mismatch(
                     existing_payload,
@@ -4413,7 +4204,7 @@ def run_depth_batch(args: argparse.Namespace, run_dir: Path, prepared_tokens: Se
                 "".join(json.dumps(job) + "\n" for job in jobs)
             )
             command = [
-                str(args.depth_python), str(HERE / "estimate_depth_anything.py"),
+                str(args.depth_python), str(HERE.parents[1] / "estimate_depth_anything.py"),
                 "--jobs", str(jobs_path), "--local-files-only",
             ]
             environment = os.environ.copy()
@@ -5159,296 +4950,6 @@ def shadow_receiver_visibility(
     return np.clip(visibility, 0.0, 1.0), diagnostics
 
 
-def directional_shadow_collapse_diagnostics(
-    raw_shadow_amount: np.ndarray,
-    receiver_masked_shadow_amount: np.ndarray,
-    actor_alpha: np.ndarray,
-) -> dict:
-    """Detect the narrow failure where receiver depth erases a strong catcher."""
-    raw = np.clip(
-        np.nan_to_num(
-            np.asarray(raw_shadow_amount, dtype=np.float32),
-            nan=0.0,
-            posinf=0.0,
-            neginf=0.0,
-        ),
-        0.0,
-        1.0,
-    )
-    masked = np.clip(
-        np.nan_to_num(
-            np.asarray(receiver_masked_shadow_amount, dtype=np.float32),
-            nan=0.0,
-            posinf=0.0,
-            neginf=0.0,
-        ),
-        0.0,
-        1.0,
-    )
-    alpha = np.asarray(actor_alpha)
-    if raw.shape != masked.shape or raw.shape != alpha.shape:
-        raise ValueError(
-            "raw shadow, receiver-masked shadow, and actor alpha must share "
-            f"one shape: {raw.shape}, {masked.shape}, {alpha.shape}"
-        )
-
-    # Pixels hidden by the inserted actor cannot establish whether a cast
-    # shadow survived in the source image. The catcher threshold excludes
-    # interpolation tails from the footprint and from the LiDAR safety gate.
-    footprint = (raw >= SHADOW_MIN_AMOUNT) & (alpha == 0)
-    footprint_pixels = int(np.count_nonzero(footprint))
-    raw_max = float(raw[footprint].max()) if footprint_pixels else 0.0
-    masked_max = float(masked[footprint].max()) if footprint_pixels else 0.0
-    retained_ratio = (
-        float(masked_max / raw_max) if raw_max > 1e-8 else 1.0
-    )
-    strong_raw_catcher = bool(
-        footprint_pixels >= DIRECTIONAL_SHADOW_COLLAPSE_MIN_FOOTPRINT_PIXELS
-        and raw_max >= DIRECTIONAL_SHADOW_COLLAPSE_MIN_RAW_MAX
-    )
-    collapsed = bool(
-        strong_raw_catcher
-        and retained_ratio
-        < DIRECTIONAL_SHADOW_COLLAPSE_MAX_RETAINED_RATIO
-    )
-    return {
-        "method": "strong_raw_catcher_retained_max_ratio_v1",
-        "collapsed": collapsed,
-        "strong_raw_catcher": strong_raw_catcher,
-        "footprint_minimum_amount": SHADOW_MIN_AMOUNT,
-        "footprint_pixel_count": footprint_pixels,
-        "raw_maximum_amount": raw_max,
-        "receiver_masked_maximum_amount": masked_max,
-        "retained_maximum_ratio": retained_ratio,
-        "minimum_raw_maximum_for_detection": (
-            DIRECTIONAL_SHADOW_COLLAPSE_MIN_RAW_MAX
-        ),
-        "maximum_retained_ratio_for_detection": (
-            DIRECTIONAL_SHADOW_COLLAPSE_MAX_RETAINED_RATIO
-        ),
-        "minimum_footprint_pixels_for_detection": (
-            DIRECTIONAL_SHADOW_COLLAPSE_MIN_FOOTPRINT_PIXELS
-        ),
-        "receiver_masked_nonzero_footprint_pixels": int(
-            np.count_nonzero(masked[footprint] > 0.0)
-        )
-        if footprint_pixels
-        else 0,
-    }
-
-
-def local_bias_corrected_directional_shadow(
-    raw_shadow_amount: np.ndarray,
-    actor_alpha: np.ndarray,
-    source_metric_depth: np.ndarray,
-    receiver_metric_depth: np.ndarray,
-) -> Tuple[Optional[np.ndarray], dict]:
-    """Re-evaluate a catcher after removing a smooth local road-depth bias.
-
-    The local constant is estimated beside the shadow and feet, never from the
-    shadow footprint itself. Only positive residual beyond that bias can mean
-    source geometry is in front of the projected receiver; source depth behind
-    the plane is not an occluder.
-    """
-    raw = np.clip(
-        np.nan_to_num(
-            np.asarray(raw_shadow_amount, dtype=np.float32),
-            nan=0.0,
-            posinf=0.0,
-            neginf=0.0,
-        ),
-        0.0,
-        1.0,
-    )
-    alpha = np.asarray(actor_alpha)
-    source_depth = np.asarray(source_metric_depth, dtype=np.float32)
-    receiver_depth = np.asarray(receiver_metric_depth, dtype=np.float32)
-    if not (
-        raw.shape
-        == alpha.shape
-        == source_depth.shape
-        == receiver_depth.shape
-    ):
-        raise ValueError(
-            "shadow, actor alpha, source depth, and receiver depth must share "
-            f"one shape: {raw.shape}, {alpha.shape}, {source_depth.shape}, "
-            f"{receiver_depth.shape}"
-        )
-
-    actor_yx = np.argwhere(alpha > 0)
-    footprint = (raw >= SHADOW_MIN_AMOUNT) & (alpha == 0)
-    footprint_yx = np.argwhere(footprint)
-    diagnostics = {
-        "method": "local_constant_signed_receiver_depth_bias_v1",
-        "status": "not_evaluated",
-        "reference_minimum_pixels": (
-            DIRECTIONAL_SHADOW_LOCAL_REFERENCE_MIN_PIXELS
-        ),
-    }
-    if not len(actor_yx):
-        diagnostics["status"] = "missing_visible_actor"
-        return None, diagnostics
-    if not len(footprint_yx):
-        diagnostics["status"] = "missing_visible_shadow_footprint"
-        return None, diagnostics
-
-    actor_height = int(actor_yx[:, 0].max() - actor_yx[:, 0].min() + 1)
-    x_pad = max(
-        8,
-        int(
-            round(
-                DIRECTIONAL_SHADOW_LOCAL_BAND_X_ACTOR_HEIGHT * actor_height
-            )
-        ),
-    )
-    y_pad_above = max(
-        4,
-        int(
-            round(
-                DIRECTIONAL_SHADOW_LOCAL_BAND_Y_ABOVE_ACTOR_HEIGHT
-                * actor_height
-            )
-        ),
-    )
-    y_pad_below = max(
-        8,
-        int(
-            round(
-                DIRECTIONAL_SHADOW_LOCAL_BAND_Y_BELOW_ACTOR_HEIGHT
-                * actor_height
-            )
-        ),
-    )
-    height, width = raw.shape
-    x_min = max(0, int(footprint_yx[:, 1].min()) - x_pad)
-    x_max = min(width, int(footprint_yx[:, 1].max()) + x_pad + 1)
-    y_min = max(0, int(footprint_yx[:, 0].min()) - y_pad_above)
-    y_max = min(height, int(footprint_yx[:, 0].max()) + y_pad_below + 1)
-    local_band = np.zeros(raw.shape, dtype=bool)
-    local_band[y_min:y_max, x_min:x_max] = True
-
-    geometric_receiver = (
-        np.isfinite(receiver_depth)
-        & (receiver_depth > 0.2)
-        & (receiver_depth <= SHADOW_RECEIVER_MAX_DEPTH_M)
-    )
-    comparable = geometric_receiver & np.isfinite(source_depth)
-    # Exclude every nonzero catcher pixel, including sub-threshold
-    # interpolation tails, and every actor pixel from the bias reference.
-    reference = (
-        local_band
-        & comparable
-        & (raw <= 0.0)
-        & (alpha == 0)
-    )
-    reference_count = int(np.count_nonzero(reference))
-    diagnostics.update(
-        {
-            "actor_height_px": actor_height,
-            "reference_bounds_xyxy": [x_min, y_min, x_max, y_max],
-            "reference_pixel_count": reference_count,
-            "footprint_pixel_count": int(np.count_nonzero(footprint)),
-        }
-    )
-    if reference_count < DIRECTIONAL_SHADOW_LOCAL_REFERENCE_MIN_PIXELS:
-        diagnostics["status"] = "insufficient_local_road_reference"
-        return None, diagnostics
-
-    signed_reference_residual = (
-        receiver_depth[reference] - source_depth[reference]
-    ).astype(np.float64)
-    initial_bias = float(np.median(signed_reference_residual))
-    reference_mad = float(
-        np.median(np.abs(signed_reference_residual - initial_bias))
-    )
-    median_reference_depth = float(np.median(receiver_depth[reference]))
-    maximum_reference_mad = max(
-        DIRECTIONAL_SHADOW_LOCAL_REFERENCE_BASE_MAX_MAD_M,
-        DIRECTIONAL_SHADOW_LOCAL_REFERENCE_MAX_MAD_DEPTH_FRACTION
-        * median_reference_depth,
-    )
-    diagnostics.update(
-        {
-            "signed_depth_bias_m": initial_bias,
-            "signed_depth_residual_mad_m": reference_mad,
-            "maximum_reference_mad_m": float(maximum_reference_mad),
-            "median_reference_receiver_depth_m": median_reference_depth,
-        }
-    )
-    if (
-        not math.isfinite(initial_bias)
-        or not math.isfinite(reference_mad)
-        or reference_mad > maximum_reference_mad
-    ):
-        diagnostics["status"] = "unstable_local_road_depth_bias"
-        return None, diagnostics
-
-    raw_support = raw > 0.0
-    evaluable_shadow = raw_support & comparable
-    recovered_visibility = np.zeros(raw.shape, dtype=np.float32)
-    signed_shadow_residual = (
-        receiver_depth[evaluable_shadow] - source_depth[evaluable_shadow]
-    )
-    # A positive corrected value means recorded geometry is closer than the
-    # receiver after accounting for the locally observed prediction bias.
-    corrected_foreground_excess = np.maximum(
-        signed_shadow_residual - initial_bias,
-        0.0,
-    )
-    tolerance = np.maximum(
-        1.0, 0.07 * receiver_depth[evaluable_shadow]
-    )
-    transition = np.maximum(
-        0.50, 0.035 * receiver_depth[evaluable_shadow]
-    )
-    recovered_visibility[evaluable_shadow] = 1.0 - np.clip(
-        (corrected_foreground_excess - tolerance)
-        / np.maximum(transition, 1e-4),
-        0.0,
-        1.0,
-    )
-    recovered_amount = np.clip(
-        raw * recovered_visibility, 0.0, 1.0
-    ).astype(np.float32)
-    recovered_diagnostics = directional_shadow_collapse_diagnostics(
-        raw,
-        recovered_amount,
-        alpha,
-    )
-    footprint_evaluable = footprint & comparable
-    diagnostics.update(
-        {
-            "status": "success",
-            "one_sided_foreground_test": True,
-            "evaluable_shadow_pixel_count": int(
-                np.count_nonzero(evaluable_shadow)
-            ),
-            "evaluable_footprint_pixel_count": int(
-                np.count_nonzero(footprint_evaluable)
-            ),
-            "corrected_foreground_excess_median_m": float(
-                np.median(
-                    np.maximum(
-                        receiver_depth[footprint_evaluable]
-                        - source_depth[footprint_evaluable]
-                        - initial_bias,
-                        0.0,
-                    )
-                )
-            )
-            if np.any(footprint_evaluable)
-            else None,
-            "recovered_maximum_amount": (
-                recovered_diagnostics["receiver_masked_maximum_amount"]
-            ),
-            "recovered_maximum_ratio": (
-                recovered_diagnostics["retained_maximum_ratio"]
-            ),
-        }
-    )
-    return recovered_amount, diagnostics
-
-
 def retain_grounded_shadow_component(
     shadow_amount: np.ndarray,
     actor_alpha: np.ndarray,
@@ -6190,7 +5691,6 @@ def prepare_token(
             speed_mps=args.speed_mps,
         )
     placement = trajectory["placement"]
-    validate_preview_placement(args, token, placement)
     basis_forward = trajectory.get("actor_basis_forward_global_xy", trajectory["reference_vehicle_forward_global_xy"])
 
     current_ego_to_global = np.asarray(frames[-1]["ego2global"], dtype=np.float64)
@@ -6576,30 +6076,21 @@ def prepare_token(
             raw_path = run_dir / "raw_ideal" / token / camera / f"{state['frame_index']}.png"
             actor_sun_path = run_dir / "raw_actor_sun" / token / camera / f"{state['frame_index']}.exr"
             actor_sky_path = run_dir / "raw_actor_sky" / token / camera / f"{state['frame_index']}.exr"
-            labeled_actor_sun_path = run_dir / "raw_labeled_actor_sun" / token / camera / f"{state['frame_index']}.exr"
-            labeled_directional_shadow_path = run_dir / "raw_labeled_directional_shadow" / token / camera / f"{state['frame_index']}.exr"
             ambient_occlusion_path = run_dir / "raw_ambient_occlusion" / token / camera / f"{state['frame_index']}.exr"
             actor_depth_path = run_dir / "raw_actor_depth" / token / camera / f"{state['frame_index']}.png"
             relative_depth_path = run_dir / "source_relative_depth" / token / camera / f"{state['frame_index']}.npz"
             info_path = raw_path.with_suffix(".render.json")
             manifest_path = run_dir / "manifests" / token / camera / f"{state['frame_index']}.json"
-            labeled_info_path = labeled_actor_sun_path.with_suffix(".render.json")
-            labeled_manifest_path = run_dir / "labeled_directional_manifests" / token / camera / f"{state['frame_index']}.json"
-            shadow_label = shadow_label_for(
-                args, token, camera, state["frame_index"]
-            )
+            shadow_label = contact_only_shadow_label()
             shadow_label_policy = (
                 shadow_label_render_policy(shadow_label)
                 if shadow_label is not None
                 else None
             )
             manifest = None
-            labeled_manifest = None
             if projected_visible:
                 projected_views += 1
-                required_base_passes = base_render_required_passes(
-                    shadow_label_policy
-                )
+                required_base_passes = BASE_RENDER_FULL_PASSES
                 camera_to_actor = state["lidar_to_actor"] @ render_utils.camera_to_lidar(calibration)
                 root_depth_m = actor_camera_depth(camera_to_actor)
                 overscan = render_utils.distortion_overscan(calibration, width, height)
@@ -6725,93 +6216,6 @@ def prepare_token(
                     )
                 ):
                     jobs.append(manifest)
-                if (
-                    shadow_label_policy is not None
-                    and shadow_label_policy["requires_directional_render"]
-                ):
-                    labeled_render_region = actor_shadow_render_region(
-                        bbox_actor,
-                        camera_to_actor,
-                        overscan["intrinsic"],
-                        overscan["resolution"],
-                        state["sun_ray_direction_actor"],
-                        SHADOW_LABEL_COUNTERFACTUAL_SUN_ENERGY,
-                        shadow_label_policy["sun_angle_degrees"],
-                    )
-                    labeled_manifest = {
-                        **manifest,
-                        "job_id": (
-                            f"{token}:{camera}:{state['frame_index']}:"
-                            "labeled-directional"
-                        ),
-                        "render_mode": "directional_only",
-                        "render_region": labeled_render_region,
-                        "lighting": {
-                            **manifest["lighting"],
-                            "sun_energy": SHADOW_LABEL_COUNTERFACTUAL_SUN_ENERGY,
-                            "sun_angle_degrees": shadow_label_policy[
-                                "sun_angle_degrees"
-                            ],
-                            "direct_sun_policy": (
-                                "vlm_recommendation_counterfactual_sun"
-                            ),
-                        },
-                        "actor_sun_output_path": str(
-                            labeled_actor_sun_path.resolve()
-                        ),
-                        "directional_shadow_output_path": str(
-                            labeled_directional_shadow_path.resolve()
-                        ),
-                        "render_info_path": str(labeled_info_path.resolve()),
-                        "shadow_label": shadow_label,
-                        "shadow_label_policy": shadow_label_policy,
-                        "shadow_labels_sha256": args.shadow_label_metadata[
-                            "sha256"
-                        ],
-                        "label_directional_render_version": (
-                            SHADOW_LABEL_DIRECTIONAL_RENDER_VERSION
-                        ),
-                        "required_passes": list(DIRECTIONAL_RENDER_PASSES),
-                        "produced_passes": list(DIRECTIONAL_RENDER_PASSES),
-                    }
-                    labeled_manifest.pop("cache_key", None)
-                    labeled_manifest["cache_key"] = compatible_render_cache_key(
-                        labeled_manifest_path,
-                        labeled_manifest,
-                        (
-                            "output_path",
-                            "actor_depth_output_path",
-                            "actor_sun_output_path",
-                            "actor_sky_output_path",
-                            "directional_shadow_output_path",
-                            "ambient_occlusion_output_path",
-                            "render_info_path",
-                            # Strength, confidence, observations, and evidence
-                            # affect only deterministic finalization. A Sun-only
-                            # render is reusable whenever camera, geometry,
-                            # direction, and selected softness (already in
-                            # `lighting`) are unchanged.
-                            "shadow_label",
-                            "shadow_label_policy",
-                            "shadow_labels_sha256",
-                        ),
-                        reuse_existing=not args.overwrite,
-                    )
-                    write_json(labeled_manifest_path, labeled_manifest)
-                    if args.overwrite or not cache_matches(
-                        labeled_actor_sun_path,
-                        labeled_info_path,
-                        labeled_manifest["cache_key"],
-                        required_paths=required_render_paths(
-                            labeled_manifest,
-                            {
-                                "directional_shadow": (
-                                    labeled_directional_shadow_path
-                                ),
-                            },
-                        ),
-                    ):
-                        jobs.append(labeled_manifest)
             view_records.append(
                 {
                     "frame_index": state["frame_index"],
@@ -6825,20 +6229,6 @@ def prepare_token(
                     "raw_path": str(raw_path) if manifest else None,
                     "actor_sun_path": str(actor_sun_path) if manifest else None,
                     "actor_sky_path": str(actor_sky_path) if manifest else None,
-                    "labeled_actor_sun_path": (
-                        str(labeled_actor_sun_path) if labeled_manifest else None
-                    ),
-                    "labeled_directional_shadow_path": (
-                        str(labeled_directional_shadow_path)
-                        if labeled_manifest
-                        else None
-                    ),
-                    "labeled_render_info_path": (
-                        str(labeled_info_path) if labeled_manifest else None
-                    ),
-                    "labeled_manifest_path": (
-                        str(labeled_manifest_path) if labeled_manifest else None
-                    ),
                     "ambient_occlusion_path": str(ambient_occlusion_path) if manifest else None,
                     "actor_depth_path": str(actor_depth_path) if manifest else None,
                     "render_info_path": str(info_path) if manifest else None,
@@ -7079,256 +6469,6 @@ def write_label_independent_finalization_cache(
     finally:
         if temporary_path is not None and temporary_path.exists():
             temporary_path.unlink()
-
-
-def ensure_directional_shadow_depth_context(
-    args: argparse.Namespace,
-    record: dict,
-    frame: dict,
-    calibration: dict,
-    width: int,
-    height: int,
-    remap_cache: dict,
-    frame_lidar_cache: dict,
-    frame_ground_cache: dict,
-    metric_depth_cache: dict,
-    road_depth_cache: dict,
-    receiver_depth_cache: dict,
-) -> dict:
-    """Lazily restore depth arrays needed only by anomaly recovery.
-
-    A finalization-cache hit intentionally does not decode these large arrays.
-    The ordinary shadow path therefore stays just as cheap as before; only a
-    detected collapse reaches this helper.
-    """
-    frame_index = int(record["frame_index"])
-    camera = str(record["camera"])
-    depth_key = (frame_index, camera)
-    if frame_index not in frame_lidar_cache:
-        frame_lidar_cache[frame_index] = geometry.load_lidar_xyz(
-            args.data_root, args.split, frame
-        )
-    if frame_index not in frame_ground_cache:
-        frame_ground_cache[frame_index] = np.asarray(
-            record["road_plane_lidar"], dtype=np.float64
-        )
-    if depth_key not in metric_depth_cache:
-        relative_path = Path(record["relative_depth_path"])
-        if not relative_path.is_file():
-            raise TokenFailure(
-                "depth_inference_failed", f"missing {relative_path}"
-            )
-        with np.load(relative_path, allow_pickle=False) as depth_data:
-            relative_depth = depth_data["relative_depth"]
-        metric_depth_cache[depth_key] = align_relative_depth_to_lidar(
-            relative_depth,
-            frame_lidar_cache[frame_index],
-            calibration,
-            required_depth_m=float(record["actor_root_depth_m"]),
-        )
-    if depth_key not in road_depth_cache:
-        road_depth_cache[depth_key] = road_depth_from_plane(
-            calibration,
-            frame_ground_cache[frame_index],
-            width,
-            height,
-            remap_cache,
-        )
-    if depth_key not in receiver_depth_cache:
-        receiver_depth_cache[depth_key] = road_depth_from_plane(
-            calibration,
-            np.asarray(record["receiver_plane_lidar"], dtype=np.float64),
-            width,
-            height,
-            remap_cache,
-        )
-    source_metric_depth, depth_alignment = metric_depth_cache[depth_key]
-    return {
-        "source_metric_depth": source_metric_depth,
-        "depth_alignment": depth_alignment,
-        "road_metric_depth": road_depth_cache[depth_key],
-        "receiver_metric_depth": receiver_depth_cache[depth_key],
-        "lidar_xyz": frame_lidar_cache[frame_index],
-        "ground_plane": frame_ground_cache[frame_index],
-    }
-
-
-def maybe_recover_collapsed_directional_shadow(
-    args: argparse.Namespace,
-    prepared: dict,
-    record: dict,
-    frame: dict,
-    calibration: dict,
-    raw_shadow_amount: np.ndarray,
-    receiver_masked_shadow_amount: np.ndarray,
-    actor_alpha: np.ndarray,
-    width: int,
-    height: int,
-    remap_cache: dict,
-    frame_lidar_cache: dict,
-    frame_ground_cache: dict,
-    metric_depth_cache: dict,
-    road_depth_cache: dict,
-    receiver_depth_cache: dict,
-) -> Tuple[np.ndarray, dict]:
-    """Recover only a depth-mask collapse that passes every safety gate."""
-    collapse = directional_shadow_collapse_diagnostics(
-        raw_shadow_amount,
-        receiver_masked_shadow_amount,
-        actor_alpha,
-    )
-    diagnostics = {
-        "version": DIRECTIONAL_SHADOW_RECOVERY_VERSION,
-        "status": "not_needed",
-        "attempted": False,
-        "recovered": False,
-        "original_receiver_mask_retained": True,
-        "collapse_detection": collapse,
-        "safety_policy": {
-            "requires_collision_free_trajectory": True,
-            "maximum_lidar_supported_footprint_pixels": 0,
-            "minimum_recovered_maximum_ratio": (
-                DIRECTIONAL_SHADOW_RECOVERY_MIN_RETAINED_RATIO
-            ),
-        },
-    }
-    if not collapse["collapsed"]:
-        return receiver_masked_shadow_amount, diagnostics
-
-    diagnostics["attempted"] = True
-    collision_diagnostics = prepared.get("collision_diagnostics", {})
-    collision_occupied = bool(collision_diagnostics.get("occupied", False))
-    diagnostics["trajectory_collision_occupied"] = collision_occupied
-    if collision_occupied:
-        diagnostics["status"] = "blocked_trajectory_collision"
-        return receiver_masked_shadow_amount, diagnostics
-
-    try:
-        depth_context = ensure_directional_shadow_depth_context(
-            args,
-            record,
-            frame,
-            calibration,
-            width,
-            height,
-            remap_cache,
-            frame_lidar_cache,
-            frame_ground_cache,
-            metric_depth_cache,
-            road_depth_cache,
-            receiver_depth_cache,
-        )
-        raw = np.asarray(raw_shadow_amount, dtype=np.float32)
-        alpha = np.asarray(actor_alpha)
-        footprint = (raw >= SHADOW_MIN_AMOUNT) & (alpha == 0)
-        receiver_depth = depth_context["receiver_metric_depth"]
-        finite_footprint = (
-            footprint
-            & np.isfinite(receiver_depth)
-            & (receiver_depth > 0.2)
-            & (receiver_depth <= SHADOW_RECEIVER_MAX_DEPTH_M)
-        )
-        if not np.any(finite_footprint):
-            diagnostics["status"] = "blocked_missing_receiver_depth"
-            return receiver_masked_shadow_amount, diagnostics
-
-        footprint_receiver_depth_m = float(
-            np.median(receiver_depth[finite_footprint])
-        )
-        lidar_support, lidar_diagnostics = lidar_foreground_support(
-            depth_context["lidar_xyz"],
-            calibration,
-            depth_context["ground_plane"],
-            footprint.astype(np.uint8),
-            footprint_receiver_depth_m,
-        )
-        lidar_supported_pixels = int(
-            np.count_nonzero(lidar_support & footprint)
-        )
-        diagnostics["lidar_foreground_support"] = {
-            **lidar_diagnostics,
-            "footprint_receiver_depth_m": footprint_receiver_depth_m,
-            "supported_footprint_pixels": lidar_supported_pixels,
-            "footprint_pixel_count": int(np.count_nonzero(footprint)),
-        }
-        if lidar_supported_pixels > 0:
-            diagnostics["status"] = "blocked_lidar_foreground_support"
-            return receiver_masked_shadow_amount, diagnostics
-
-        recovered_amount, local_bias_diagnostics = (
-            local_bias_corrected_directional_shadow(
-                raw_shadow_amount,
-                actor_alpha,
-                depth_context["source_metric_depth"],
-                receiver_depth,
-            )
-        )
-        diagnostics["local_depth_bias"] = local_bias_diagnostics
-        diagnostics["depth_alignment"] = depth_context["depth_alignment"]
-        if recovered_amount is None:
-            diagnostics["status"] = (
-                "blocked_" + local_bias_diagnostics["status"]
-            )
-            return receiver_masked_shadow_amount, diagnostics
-
-        recovered_evaluation = directional_shadow_collapse_diagnostics(
-            raw_shadow_amount,
-            recovered_amount,
-            actor_alpha,
-        )
-        diagnostics["recovered_shadow_evaluation"] = recovered_evaluation
-        if (
-            recovered_evaluation["retained_maximum_ratio"]
-            < DIRECTIONAL_SHADOW_RECOVERY_MIN_RETAINED_RATIO
-        ):
-            diagnostics["status"] = (
-                "blocked_local_foreground_remains"
-            )
-            return receiver_masked_shadow_amount, diagnostics
-    except (KeyError, OSError, TokenFailure, ValueError) as exc:
-        diagnostics.update(
-            {
-                "status": "blocked_depth_context_unavailable",
-                "error_type": type(exc).__name__,
-                "error": str(exc),
-            }
-        )
-        return receiver_masked_shadow_amount, diagnostics
-
-    diagnostics.update(
-        {
-            "status": "recovered_local_receiver_depth_bias",
-            "recovered": True,
-            "original_receiver_mask_retained": False,
-        }
-    )
-    return recovered_amount, diagnostics
-
-
-def directional_shadow_suppression_potential_failure(
-    token: str,
-    record: dict,
-    placement: dict,
-    recovery_diagnostics: dict,
-) -> dict:
-    """Describe a requested shadow that stayed suppressed after safe recovery."""
-    camera = str(record["camera"])
-    frame_index = int(record["frame_index"])
-    reason = str(recovery_diagnostics["status"])
-    return {
-        "status": "potential_failure",
-        "token": token,
-        "code": "directional_shadow_suppressed_by_receiver_depth",
-        "message": (
-            "A strong requested directional shadow collapsed under receiver-"
-            f"depth masking at {camera} frame {frame_index}; the original mask "
-            f"was retained because recovery was {reason}."
-        ),
-        "camera": camera,
-        "frame_index": frame_index,
-        "placement": placement,
-        "directional_shadow_recovery": recovery_diagnostics,
-    }
 
 
 def compute_label_independent_finalization_intermediates(
@@ -7711,7 +6851,7 @@ def finalize_token(
         shadow_label = record.get("shadow_label")
         shadow_label_policy = record.get("shadow_label_policy")
         label_composition_diagnostics = {
-            "enabled": uses_shadow_composition(args),
+            "enabled": True,
             "method": "not_evaluated",
         }
         source = np.asarray(Image.open(record["source_path"]).convert("RGB"))
@@ -7746,37 +6886,6 @@ def finalize_token(
             ):
                 raise TokenFailure("render_failed", f"missing or stale render: {raw_path}")
             render_info = json.loads(info_path.read_text())
-            labeled_manifest = None
-            if (
-                shadow_label_policy is not None
-                and shadow_label_policy["requires_directional_render"]
-            ):
-                labeled_actor_sun_path = Path(record["labeled_actor_sun_path"])
-                labeled_directional_shadow_path = Path(
-                    record["labeled_directional_shadow_path"]
-                )
-                labeled_info_path = Path(record["labeled_render_info_path"])
-                labeled_manifest = json.loads(
-                    Path(record["labeled_manifest_path"]).read_text()
-                )
-                if not cache_matches(
-                    labeled_actor_sun_path,
-                    labeled_info_path,
-                    labeled_manifest["cache_key"],
-                    required_paths=required_render_paths(
-                        labeled_manifest,
-                        {
-                            "directional_shadow": (
-                                labeled_directional_shadow_path
-                            ),
-                        },
-                    ),
-                ):
-                    raise TokenFailure(
-                        "render_failed",
-                        "missing or stale label-selected directional render: "
-                        f"{labeled_actor_sun_path}",
-                    )
             cache_path = finalization_cache_path(run_dir, token, record)
             finalization_cache_key = label_independent_finalization_cache_key(
                 args,
@@ -7824,11 +6933,8 @@ def finalize_token(
             base_arrays = base_bundle["arrays"]
             base_diagnostics = base_bundle["diagnostics"]
             actor_rgba = base_arrays["actor_rgba"]
-            # Retain this alias for the existing invisible-label no-op branch.
-            distorted = actor_rgba
             actor_alpha = actor_rgba[..., 3]
             receiver_visibility = base_arrays["receiver_visibility"]
-            contact_region_sensor = base_arrays["contact_region_sensor"]
             occlusion_diagnostics = base_diagnostics["occlusion"]
             degradation_diagnostics = base_diagnostics["degradation"]
             harmonization_diagnostics = base_diagnostics["harmonization"]
@@ -7839,44 +6945,17 @@ def finalize_token(
                 "key": finalization_cache_key,
                 "path": str(cache_path),
             }
-            if (
-                uses_shadow_composition(args)
-                and np.any(actor_alpha > 0)
-                and shadow_label is None
-            ):
+            actor_sun_source_path = actor_sun_path
+            try:
+                actor_sun_render_diagnostics = base_diagnostics[
+                    "base_actor_sun_render"
+                ]
+                actor_sun_raw = base_arrays["base_actor_sun_raw"]
+            except KeyError as exc:
                 raise TokenFailure(
-                    "missing_shadow_label",
-                    f"visible actor has no shadow decision for "
-                    f"{token}/{camera}/{frame_index}.png",
-                )
-
-            if labeled_manifest is not None:
-                actor_sun_source_path = labeled_actor_sun_path
-                actor_sun_ideal, actor_sun_render_diagnostics = (
-                    load_linear_actor_exr(
-                        actor_sun_source_path,
-                        labeled_manifest,
-                    )
-                )
-                actor_sun_raw = distort_linear_actor_rgba(
-                    actor_sun_ideal,
-                    calibration,
-                    remap_cache,
-                    output_size=(width, height),
-                    ideal_origin=render_storage_ideal_origin(labeled_manifest),
-                )
-            else:
-                actor_sun_source_path = actor_sun_path
-                try:
-                    actor_sun_render_diagnostics = base_diagnostics[
-                        "base_actor_sun_render"
-                    ]
-                    actor_sun_raw = base_arrays["base_actor_sun_raw"]
-                except KeyError as exc:
-                    raise TokenFailure(
-                        "render_failed",
-                        "contact-only finalization requires the base actor Sun pass",
-                    ) from exc
+                    "render_failed",
+                    "contact-only finalization requires the base actor Sun pass",
+                ) from exc
             actor_sky_raw = base_arrays["actor_sky_raw"]
             actor_sky_render_diagnostics = base_diagnostics["actor_sky_render"]
             actor_sun_linear, actor_sky_linear, actor_lighting_diagnostics = (
@@ -7898,115 +6977,29 @@ def finalize_token(
                     else 0.0,
                 }
             )
-            direct_sun_energy = (
-                SHADOW_LABEL_COUNTERFACTUAL_SUN_ENERGY
-                if shadow_label_policy is not None
-                and shadow_label_policy["requires_directional_render"]
-                else 0.0
+            direct_sun_energy = 0.0  # contact-only: no directional Sun render
+            directional_shadow_amount = np.zeros(
+                actor_alpha.shape, dtype=np.float32
             )
-            if direct_sun_energy > 0.0:
-                directional_ideal, directional_shadow_diagnostics = (
-                    load_shadow_catcher_amount(
-                        labeled_directional_shadow_path,
-                        labeled_manifest,
-                        minimum_amount=SHADOW_MIN_AMOUNT,
-                    )
-                )
-                raw_directional_shadow_amount = (
-                    render_utils.distort_scalar_map(
-                        directional_ideal,
-                        calibration,
-                        remap_cache,
-                        output_size=(width, height),
-                        ideal_origin=render_storage_ideal_origin(
-                            labeled_manifest
-                        ),
-                        border_value=0.0,
-                        interpolation=cv2.INTER_LINEAR,
-                    )
-                )
-                directional_shadow_amount = np.clip(
-                    raw_directional_shadow_amount * receiver_visibility,
-                    0.0,
-                    1.0,
-                )
-                (
-                    directional_shadow_amount,
-                    directional_recovery_diagnostics,
-                ) = maybe_recover_collapsed_directional_shadow(
-                    args,
-                    prepared,
-                    record,
-                    frame,
-                    calibration,
-                    raw_directional_shadow_amount,
-                    directional_shadow_amount,
-                    actor_alpha,
-                    width,
-                    height,
-                    remap_cache,
-                    frame_lidar_cache,
-                    frame_ground_cache,
-                    metric_depth_cache,
-                    road_depth_cache,
-                    receiver_depth_cache,
-                )
-                if (
-                    directional_recovery_diagnostics[
-                        "collapse_detection"
-                    ]["collapsed"]
-                    and not directional_recovery_diagnostics["recovered"]
-                ):
-                    warning = (
-                        directional_shadow_suppression_potential_failure(
-                            token,
-                            record,
-                            prepared["placement"],
-                            directional_recovery_diagnostics,
-                        )
-                    )
-                    finalization_potential_failures.append(warning)
-                    record_potential_failure(run_dir, warning)
-                directional_shadow_amount, directional_component_diagnostics = (
-                    retain_grounded_shadow_component(
-                        directional_shadow_amount, actor_alpha
-                    )
-                )
-                (
-                    directional_shadow_amount,
-                    directional_actor_edge_diagnostics,
-                ) = overlap_receiver_matte_with_actor_edge(
-                    directional_shadow_amount,
-                    actor_alpha,
-                    receiver_visibility,
-                    contact_region_sensor,
-                )
-                directional_component_diagnostics[
-                    "actor_edge_receiver_overlap"
-                ] = directional_actor_edge_diagnostics
-            else:
-                directional_shadow_amount = np.zeros(
-                    actor_alpha.shape, dtype=np.float32
-                )
-                directional_component_diagnostics = {
-                    "method": "not_evaluated",
-                    "status": "contact_only_no_directional_render",
-                }
-                directional_shadow_diagnostics = {
-                    "method": "contact_only",
-                    "path": None,
-                }
-                directional_recovery_diagnostics = {
-                    "version": DIRECTIONAL_SHADOW_RECOVERY_VERSION,
-                    "status": "not_evaluated_no_directional_render",
-                    "attempted": False,
-                    "recovered": False,
-                }
+            directional_component_diagnostics = {
+                "method": "not_evaluated",
+                "status": "contact_only_no_directional_render",
+            }
+            directional_shadow_diagnostics = {
+                "method": "contact_only",
+                "path": None,
+            }
+            directional_recovery_diagnostics = {
+                "version": DIRECTIONAL_SHADOW_RECOVERY_VERSION,
+                "status": "not_evaluated_no_directional_render",
+                "attempted": False,
+                "recovered": False,
+            }
             directional_shadow_diagnostics.update(
                 {
                     "semantic": "Vdir_geometric_direct_sun_occlusion",
                     "rendered_sun_energy": direct_sun_energy,
-                    "decision_source": shadow_decision_source(args, shadow_label),
+                    "decision_source": CONTACT_ONLY_SHADOW_POLICY_VERSION,
                     "receiver_visibility": receiver_diagnostics,
                     "receiver_depth_recovery": (
                         directional_recovery_diagnostics
@@ -8057,90 +7050,49 @@ def finalize_token(
                     ),
                 }
             )
-            if uses_shadow_composition(args):
-                if shadow_label_policy is None:
-                    # Receiver-marker timestep labels are omitted only when the
-                    # actor is invisible in every synchronized camera. A
-                    # missing label is therefore accepted only for an actor
-                    # that remains fully invisible in this finalized view.
-                    labeled_shadow_alpha = np.zeros(
-                        actor_alpha.shape, dtype=np.uint8
-                    )
-                    composited_actor = distorted
-                    label_composition_diagnostics = {
-                        "enabled": True,
-                        "method": "unlabeled_invisible_actor_noop",
-                        "decision_source": "no_visible_actor_in_any_camera_at_timestep",
-                        "actor_pixel_count": 0,
-                        "directional_shadow_applied": False,
-                        "contact_ao_applied": False,
-                        "diffuse_body_occlusion_applied": False,
-                    }
-                else:
-                    (
-                        labeled_shadow_alpha,
-                        labeled_shadow_diagnostics,
-                    ) = compose_labeled_shadow_alpha(
-                        directional_shadow_amount,
-                        ambient_occlusion_amount,
-                        shadow_label_policy["directional_gain"],
-                        shadow_label_policy["ambient_occlusion_gain"],
-                    )
-                    composited_actor = compose_actor_lighting_rgba(
-                        actor_rgba,
-                        actor_sun_linear,
-                        actor_sky_linear,
-                        shadow_label_policy["actor_sun_gain"],
-                    )
-                    label_composition_diagnostics = {
-                        "enabled": True,
-                        "method": SHADOW_LABEL_COMPOSITION_VERSION,
-                        "decision_source": shadow_decision_source(
-                            args, shadow_label
-                        ),
-                        "consensus_or_smoothing_applied": False,
-                        "shadow_label": shadow_label,
-                        "render_policy": shadow_label_policy,
-                        "directional_shadow_applied": bool(
-                            shadow_label_policy["requires_directional_render"]
-                        ),
-                        "contact_ao_applied": True,
-                        "diffuse_body_occlusion_applied": True,
-                        "actor_illumination": (
-                            "Osky_plus_scaled_label_selected_Osun"
-                        ),
-                        **(
-                            {
-                                "shadow_labels_sha256": (
-                                    args.shadow_label_metadata["sha256"]
-                                ),
-                            }
-                            if args.shadow_labels is not None
-                            else {}
-                        ),
-                        **labeled_shadow_diagnostics,
-                    }
-                shadowed_source = render_utils.apply_shadow_linear(
-                    source, labeled_shadow_alpha, 1.0
-                )
-                composited_shadow_alpha = labeled_shadow_alpha
-                actor_lighting_diagnostics.update(
-                    {
-                        "composition_source": shadow_decision_source(
-                            args, shadow_label
-                        ),
-                        "selected_actor_sun_gain": (
-                            shadow_label_policy["actor_sun_gain"]
-                            if shadow_label_policy is not None
-                            else 0.0
-                        ),
-                        "selected_actor_sun_render": (
-                            str(actor_sun_source_path)
-                            if shadow_label_policy is not None
-                            else None
-                        ),
-                    }
-                )
+            (
+                labeled_shadow_alpha,
+                labeled_shadow_diagnostics,
+            ) = compose_labeled_shadow_alpha(
+                directional_shadow_amount,
+                ambient_occlusion_amount,
+                shadow_label_policy["directional_gain"],
+                shadow_label_policy["ambient_occlusion_gain"],
+            )
+            composited_actor = compose_actor_lighting_rgba(
+                actor_rgba,
+                actor_sun_linear,
+                actor_sky_linear,
+                shadow_label_policy["actor_sun_gain"],
+            )
+            label_composition_diagnostics = {
+                "enabled": True,
+                "method": SHADOW_LABEL_COMPOSITION_VERSION,
+                "decision_source": CONTACT_ONLY_SHADOW_POLICY_VERSION,
+                "consensus_or_smoothing_applied": False,
+                "shadow_label": shadow_label,
+                "render_policy": shadow_label_policy,
+                "directional_shadow_applied": bool(
+                    shadow_label_policy["requires_directional_render"]
+                ),
+                "contact_ao_applied": True,
+                "diffuse_body_occlusion_applied": True,
+                "actor_illumination": (
+                    "Osky_plus_scaled_label_selected_Osun"
+                ),
+                **labeled_shadow_diagnostics,
+            }
+            shadowed_source = render_utils.apply_shadow_linear(
+                source, labeled_shadow_alpha, 1.0
+            )
+            composited_shadow_alpha = labeled_shadow_alpha
+            actor_lighting_diagnostics.update(
+                {
+                    "composition_source": CONTACT_ONLY_SHADOW_POLICY_VERSION,
+                    "selected_actor_sun_gain": shadow_label_policy["actor_sun_gain"],
+                    "selected_actor_sun_render": str(actor_sun_source_path),
+                }
+            )
             edited, actor_alpha = render_utils.alpha_composite(
                 shadowed_source, composited_actor
             )
@@ -8171,7 +7123,7 @@ def finalize_token(
             ambient_occlusion_diagnostics = {"method": "not_projected"}
             foot_contact_diagnostics = {"method": "not_projected"}
             label_composition_diagnostics = {
-                "enabled": uses_shadow_composition(args),
+                "enabled": True,
                 "method": "not_projected_noop",
                 "decision_source": "no_projected_actor",
                 "directional_shadow_applied": False,
@@ -8283,60 +7235,35 @@ def finalize_token(
         "timestamps_s": prepared["timestamps_s"].tolist(),
         "render_pipeline_version": RENDER_PIPELINE_VERSION,
         "background_policy": "source_files_untouched_and_referenced_per_record",
-        **(
-            {
-                "output_composition": {
-                    "mode": SHADOW_LABEL_COMPOSITION_VERSION,
-                    "preview": False,
-                    "image_tree": "images",
-                    "mask_tree": "masks",
-                    "decision_policy": shadow_decision_policy(args),
-                    "directional_shadow": (
-                        "disabled_by_uniform_contact_only_policy"
-                        if getattr(args, "contact_only", False)
-                        else (
-                            "label_selected_single_sun_only_render_scaled_by_"
-                            "fixed_strength_gain"
-                        )
-                    ),
-                    "actor_illumination": (
-                        "Osky_only"
-                        if getattr(args, "contact_only", False)
-                        else (
-                            "Osky_plus_fixed_strength_scaled_label_selected_"
-                            "Osun"
-                        )
-                    ),
-                    "ambient_occlusion": (
-                        "sun_off_diffuse_body_plus_wheel_contact_max"
-                        if getattr(args, "car", False)
-                        else "sun_off_diffuse_body_plus_stance_contact_max"
-                    ),
-                    "ambient_occlusion_gains": (
-                        SHADOW_LABEL_AMBIENT_OCCLUSION_GAINS
-                    ),
-                    "directional_gains": SHADOW_LABEL_DIRECTIONAL_GAINS,
-                    "actor_sun_gains": SHADOW_LABEL_ACTOR_SUN_GAINS,
-                    "sun_angles_degrees": (
-                        SHADOW_LABEL_SUN_ANGLES_DEGREES
-                    ),
-                    "counterfactual_sun_energy": (
-                        SHADOW_LABEL_COUNTERFACTUAL_SUN_ENERGY
-                    ),
-                    "directional_shadow_receiver_recovery": (
-                        DIRECTIONAL_SHADOW_RECOVERY_VERSION
-                    ),
-                    "shadow_policy_source": args.shadow_label_metadata,
-                    **(
-                        {"shadow_labels": args.shadow_label_metadata}
-                        if args.shadow_labels is not None
-                        else {}
-                    ),
-                }
-            }
-            if uses_shadow_composition(args)
-            else {}
-        ),
+        "output_composition": {
+            "mode": SHADOW_LABEL_COMPOSITION_VERSION,
+            "preview": False,
+            "image_tree": "images",
+            "mask_tree": "masks",
+            "decision_policy": "apply_uniform_contact_only_to_all_selected_views",
+            "directional_shadow": "disabled_by_uniform_contact_only_policy",
+            "actor_illumination": "Osky_only",
+            "ambient_occlusion": (
+                "sun_off_diffuse_body_plus_wheel_contact_max"
+                if getattr(args, "car", False)
+                else "sun_off_diffuse_body_plus_stance_contact_max"
+            ),
+            "ambient_occlusion_gains": (
+                SHADOW_LABEL_AMBIENT_OCCLUSION_GAINS
+            ),
+            "directional_gains": SHADOW_LABEL_DIRECTIONAL_GAINS,
+            "actor_sun_gains": SHADOW_LABEL_ACTOR_SUN_GAINS,
+            "sun_angles_degrees": (
+                SHADOW_LABEL_SUN_ANGLES_DEGREES
+            ),
+            "counterfactual_sun_energy": (
+                SHADOW_LABEL_COUNTERFACTUAL_SUN_ENERGY
+            ),
+            "directional_shadow_receiver_recovery": (
+                DIRECTIONAL_SHADOW_RECOVERY_VERSION
+            ),
+            "shadow_policy_source": args.shadow_label_metadata,
+        },
         "shadow_data_contract": {
             "raw_render_storage": RAW_RENDER_STORAGE_VERSION,
             "base_render_pass_policy": BASE_RENDER_PASS_POLICY_VERSION,
@@ -8359,13 +7286,7 @@ def finalize_token(
                 "max_actor_policy_selected_vdir_and_sky_occlusion_with_"
                 "shadow_capped_at_249"
             ),
-            **(
-                {
-                    "shadow_policy": shadow_decision_policy(args),
-                }
-                if uses_shadow_composition(args)
-                else {}
-            ),
+            "shadow_policy": "apply_uniform_contact_only_to_all_selected_views",
         },
         "grounding_method": (
             "single_rigid_world_pose_from_final_history_ground_v1"
@@ -8383,18 +7304,7 @@ def finalize_token(
             *finalization_potential_failures,
         ],
         "lighting": prepared["lighting"],
-        **(
-            {
-                "shadow_policy_source": args.shadow_label_metadata,
-                **(
-                    {"shadow_label_source": args.shadow_label_metadata}
-                    if args.shadow_labels is not None
-                    else {}
-                ),
-            }
-            if uses_shadow_composition(args)
-            else {}
-        ),
+        "shadow_policy_source": args.shadow_label_metadata,
         "annotation_sample": annotation,
         "records": final_records,
     }
@@ -8422,18 +7332,14 @@ def record_failure(run_dir: Path, token: str, code: str, message: str, args: arg
 
 
 def normalize_potential_failures(value: Any) -> List[dict]:
-    """Accept both legacy per-token objects and the current warning lists."""
+    """A token's potential-failure warnings (a list of objects)."""
     if value is None:
         return []
-    if isinstance(value, dict):
-        return [value]
     if isinstance(value, list) and all(
         isinstance(item, dict) for item in value
     ):
         return list(value)
-    raise ValueError(
-        "potential-failure data must be an object or a list of objects"
-    )
+    raise ValueError("potential-failure data must be a list of objects")
 
 
 def deduplicate_potential_failures(warnings: Sequence[dict]) -> List[dict]:
@@ -8690,17 +7596,15 @@ def main():
     validate_actor_mode(args)
     placement_request(args)
     stage = getattr(args, "stage", "all")
-    if args.preview and stage != "all":
-        raise ValueError("Stage selection applies to final compositing, not receiver previews")
     store = None
     if stage != "all":
         run_dir = args.output_root / args.scene_filter.stem / args.run_name
         if (run_dir / "compaction_report.json").exists():
             raise RuntimeError("This run has entered evaluation-only compaction; choose a new run name")
         request = edit_preparation.request_identity(args, [
-            __file__, geometry.__file__, render_utils.__file__, receiver_previews.__file__,
+            __file__, geometry.__file__, render_utils.__file__,
             benign_placements.__file__, front_visibility.__file__, benign_sides.__file__, edit_preparation.__file__,
-            HERE / "animal_composite_navsim_blender.py",
+            HERE.parent / "animal_composite_navsim_blender.py",
         ])
         store = edit_preparation.PreparationStore(run_dir, "navsim", request)
     if stage == "render":
@@ -8708,32 +7612,10 @@ def main():
         render_prepared(args, run_dir, prepared_tokens, index["tokens"])
         return
     configure_direction_classifications(args)
-    if args.preview:
-        receiver_previews.run_receiver_preview(
-            args,
-            sys.modules[__name__],
-            HERE,
-        )
-        return
-
-    if args.shadow_labels is not None:
-        (
-            args.shadow_label_lookup,
-            args.shadow_label_metadata,
-        ) = receiver_previews.load_receiver_shadow_labels(
-            args.shadow_labels,
-            args,
-            sys.modules[__name__],
-            HERE,
-        )
-        args.shadow_labels = Path(args.shadow_label_metadata["path"])
-    elif args.contact_only:
-        args.shadow_label_lookup = None
-        args.shadow_label_metadata = contact_only_shadow_metadata()
-    else:  # argparse's required mutually-exclusive group should make this unreachable.
-        raise RuntimeError("a final shadow mode was not selected")
-    # Either final mode may reuse valid base renders/finalization caches, but
-    # it must always rebuild derived products using the selected shadow policy.
+    # Contact-only shadows are the only shadow mode.
+    args.shadow_label_metadata = contact_only_shadow_metadata()
+    # Valid base renders/finalization caches may be reused, but derived products
+    # are always rebuilt.
     args.refinalize = True
     if args.speed_mps <= 0:
         raise ValueError("pedestrian speed must be positive")
@@ -8776,31 +7658,6 @@ def main():
         )
     run_name = args.run_name
     run_dir = args.output_root / args.scene_filter.stem / run_name
-    if args.shadow_labels is not None:
-        label_input_root = args.shadow_label_metadata.get("input_root")
-        if not isinstance(label_input_root, str) or not label_input_root.strip():
-            raise ValueError(
-                "shadow-label JSON must record the preview input_root it labeled"
-            )
-        expected_preview_root = (run_dir / "preview_images").resolve()
-        actual_preview_root = Path(label_input_root).expanduser().resolve()
-        if actual_preview_root != expected_preview_root:
-            raise ValueError(
-                "Shadow labels were produced for a different preview tree: "
-                f"{actual_preview_root}; expected {expected_preview_root}"
-            )
-        label_metadata_root = args.shadow_label_metadata.get("metadata_root")
-        if not isinstance(label_metadata_root, str) or not label_metadata_root.strip():
-            raise ValueError(
-                "shadow-label JSON must record the compositor metadata_root it used"
-            )
-        expected_metadata_root = (run_dir / "metadata").resolve()
-        actual_metadata_root = Path(label_metadata_root).expanduser().resolve()
-        if actual_metadata_root != expected_metadata_root:
-            raise ValueError(
-                "Shadow labels used metadata from a different run: "
-                f"{actual_metadata_root}; expected {expected_metadata_root}"
-            )
     run_dir.mkdir(parents=True, exist_ok=True)
 
     assets = load_asset_pool(args)
@@ -8933,26 +7790,25 @@ def main():
     if getattr(args, "benign", False):
         run_config["timed_interception_policy"] = "lateral_offset_with_full_path_clearance"
         run_config.pop("first_contact_tolerance_m", None)
-    if uses_shadow_composition(args):
-        run_config["shadow_label_composition"] = {
-            **args.shadow_label_metadata,
-            "composition_version": SHADOW_LABEL_COMPOSITION_VERSION,
-            "directional_render_version": (
-                SHADOW_LABEL_DIRECTIONAL_RENDER_VERSION
-            ),
-            "counterfactual_sun_energy": (
-                SHADOW_LABEL_COUNTERFACTUAL_SUN_ENERGY
-            ),
-            "directional_gains": SHADOW_LABEL_DIRECTIONAL_GAINS,
-            "ambient_occlusion_gains": (
-                SHADOW_LABEL_AMBIENT_OCCLUSION_GAINS
-            ),
-            "actor_sun_gains": SHADOW_LABEL_ACTOR_SUN_GAINS,
-            "sun_angles_degrees": SHADOW_LABEL_SUN_ANGLES_DEGREES,
-            "diffuse_body_occlusion_minimum_attenuation": (
-                DIFFUSE_BODY_OCCLUSION_MIN_AMOUNT
-            ),
-        }
+    run_config["shadow_label_composition"] = {
+        **args.shadow_label_metadata,
+        "composition_version": SHADOW_LABEL_COMPOSITION_VERSION,
+        "directional_render_version": (
+            SHADOW_LABEL_DIRECTIONAL_RENDER_VERSION
+        ),
+        "counterfactual_sun_energy": (
+            SHADOW_LABEL_COUNTERFACTUAL_SUN_ENERGY
+        ),
+        "directional_gains": SHADOW_LABEL_DIRECTIONAL_GAINS,
+        "ambient_occlusion_gains": (
+            SHADOW_LABEL_AMBIENT_OCCLUSION_GAINS
+        ),
+        "actor_sun_gains": SHADOW_LABEL_ACTOR_SUN_GAINS,
+        "sun_angles_degrees": SHADOW_LABEL_SUN_ANGLES_DEGREES,
+        "diffuse_body_occlusion_minimum_attenuation": (
+            DIFFUSE_BODY_OCCLUSION_MIN_AMOUNT
+        ),
+    }
     config_path = run_dir / "run_config.json"
     if config_path.is_file():
         existing = json.loads(config_path.read_text())
@@ -8988,27 +7844,8 @@ def main():
             "directional_shadow_receiver_recovery",
             "shadow_label_composition",
         }
-        pass_migration_keys = {
-            "render_pipeline_version",
-            "base_render_pass_policy",
-            "actor_lighting_intermediate",
-            "label_independent_finalization_cache",
-        }
-        known_pass_migration = (
-            existing.get("render_pipeline_version")
-            == LEGACY_RENDER_PIPELINE_VERSION
-            and run_config["render_pipeline_version"]
-            == RENDER_PIPELINE_VERSION
-            and existing.get("label_independent_finalization_cache")
-            == LEGACY_FINALIZATION_CACHE_VERSION
-            and run_config["label_independent_finalization_cache"]
-            == FINALIZATION_CACHE_VERSION
-        )
-        allowed_changed_keys = set(refinalizable_keys)
-        if known_pass_migration:
-            allowed_changed_keys.update(pass_migration_keys)
         if changed_keys and not (
-            args.refinalize and changed_keys <= allowed_changed_keys
+            args.refinalize and changed_keys <= set(refinalizable_keys)
         ):
             raise RuntimeError(f"Run configuration conflicts with existing {config_path}; choose a different --run-name")
         if changed_keys:

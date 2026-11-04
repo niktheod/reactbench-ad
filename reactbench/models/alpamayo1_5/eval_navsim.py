@@ -11,7 +11,6 @@ navigation instruction. Predictions go to ``<outputs>/predictions/alpamayo1_5/<d
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import sys
@@ -24,9 +23,9 @@ import yaml
 
 from ...scoring.actor_motion import inserted_actor_motion
 from ...scoring.geometry import project_acceleration_onto_velocity
-from ...scoring.motion_bins import NAVSIM_BIN_SPEC_ID
 from ...scoring.records import run_summary, sample_record
-from ..common import (MAX_TORCH_SEED, SUPPORTED_IMAGE_SUFFIXES, annotations_path, current_speed_mps,
+from ..seeds import paired_seed
+from ..common import (SUPPORTED_IMAGE_SUFFIXES, annotations_path, current_speed_mps,
                       discover_tokens, expand_config, load_annotations_index, load_json, load_run_config,
                       predictions_dir, resolve_directory, resolve_file, select_tokens, trajectory_poses)
 from ..original_cache import cache_signature, save_original_manifest, validate_original_cache
@@ -43,21 +42,7 @@ FRAMES_PER_CAMERA = 4
 
 CURRENT_FRAME_INDEX = 3
 
-def diffusion_seed_for_token(token: str, base_seed: int) -> int:
-    """Derive a stable per-token seed shared by its original/edited pair."""
-
-    if not isinstance(token, str) or not token:
-        raise ValueError("token must be a non-empty string")
-    base_seed = int(base_seed)
-    if not 0 <= base_seed <= MAX_TORCH_SEED:
-        raise ValueError(
-            "base_seed must be between 0 and 2**63 - 1, "
-            f"got {base_seed}"
-        )
-
-    material = f"alpamayo-diffusion:{base_seed}:{token}".encode("utf-8")
-    digest = hashlib.sha256(material).digest()
-    return int.from_bytes(digest[:8], byteorder="big") >> 1
+SEED_NAMESPACE = "alpamayo-diffusion"  # per-token seeds: models/seeds.py
 
 
 def jsonable(value: Any) -> Any:
@@ -247,7 +232,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         stage = "load_input"
         seed: Optional[int] = None
         try:
-            seed = diffusion_seed_for_token(token, agent.diffusion_seed_base)
+            seed = paired_seed(SEED_NAMESPACE, agent.diffusion_seed_base, token)
             if token not in annotations_by_token:
                 raise KeyError(f"Token {token!r} is absent from {annotations_file}")
             annotation = annotations_by_token[token]
@@ -272,12 +257,10 @@ def main(argv: Sequence[str] | None = None) -> None:
                 stage = "metrics"
                 original_metric = metric_trajectory(original_poses, interval_length_s=interval_length_s,
                                                     metric_horizon_s=metric_horizon_s)
-                edited_metric = metric_trajectory(edited_poses, interval_length_s=interval_length_s,
-                                                  metric_horizon_s=metric_horizon_s)
-                record = sample_record(bin_spec=NAVSIM_BIN_SPEC_ID, token=token, output_stem=token,
-                                       original_trajectory=original_metric, edited_trajectory=edited_metric,
-                                       actor_motion=actor_motion, interval_length_s=interval_length_s,
-                                       speed_mps=speed_mps, longitudinal_acceleration_mps2=acceleration)
+                # The edited plan must also cover the metric horizon.
+                metric_trajectory(edited_poses, interval_length_s=interval_length_s, metric_horizon_s=metric_horizon_s)
+                record = sample_record(token=token, output_stem=token,
+                                       actor_motion=actor_motion, speed_mps=speed_mps, longitudinal_acceleration_mps2=acceleration)
                 record.update(placement_metadata_path=str(metadata_path), diffusion_seed=seed,
                               native_pose_count=int(original_poses.shape[0]),
                               metric_pose_count=int(original_metric.shape[0]),

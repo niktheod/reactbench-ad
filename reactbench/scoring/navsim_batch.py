@@ -5,9 +5,7 @@ reusing ego samples and rejecting distant road users early.
 """
 from __future__ import annotations
 
-import hashlib
 import math
-from pathlib import Path
 
 import numpy as np
 
@@ -16,11 +14,6 @@ from .collisions import (
     footprint_signed_clearance, sample_pose, signed_clearances, track_corners,
     vehicle_footprint_corners, vehicle_footprint_parameters,
 )
-
-
-def implementation_identity():
-    """Record this execution backend separately from the frozen input artifact."""
-    return {"name": "navsim-raw-batch-v1", "sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
 
 
 def _track_times(track, times, horizon):

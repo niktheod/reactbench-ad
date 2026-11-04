@@ -38,14 +38,14 @@ while (( $# > 2 )); do
     esac
 done
 RUN_NAME="${1:?RUN_NAME}"; TIMESTEP="${2:?TIMESTEP}"
-ENTRY="$HERE/batch_composite_navsim_blender.py"; ASSET_ROOT="$HERE/blender_asset"; MODE_ARGS=()
+ENTRY=reactbench.compositing.navsim.compositor.engine; ASSET_ROOT="$HERE/compositor/blender_asset"; MODE_ARGS=()
 case "$MODE" in
     crossing) ASSETS="${ASSETS:-$ASSETS_ROOT/rocketbox/assets}"  # benign walkers do not cross: no directions
               (( BENIGN )) || MODE_ARGS=(--direction-classifications "$DIRECTIONS") ;;
     standing) ASSETS="${ASSETS:-$ASSETS_ROOT/rocketbox/assets}"; MODE_ARGS=(--standing) ;;
     car) ASSETS="${ASSETS:-$ASSETS_ROOT/openx/assets}"; MODE_ARGS=(--car) ;;
     animal) ASSETS="${ASSETS:-$ASSETS_ROOT/rocketbox_standing_animals/assets}"; MODE_ARGS=(--standing)
-            ENTRY="$HERE/animal_composite_navsim_blender.py"; ASSET_ROOT="$HERE/animal_blender_asset" ;;
+            ENTRY=reactbench.compositing.navsim.animal_composite_navsim_blender; ASSET_ROOT="$HERE/animal_blender_asset" ;;
 esac
 ROOT="$(dirname "$(location reactnav datasets/reactnav)")"
 [[ ${#OUTPUT[@]} -gt 0 ]] && ROOT="${OUTPUT[1]}"
@@ -54,10 +54,10 @@ COMMON=(--scene-filter "$FILTER" --split "$SPLIT" "${MODE_ARGS[@]}" --asset-root
         --blender "$(location blender third_party/blender-4.5.11-linux-x64/blender)" --timestep "$TIMESTEP"
         --run-name "$RUN_NAME" --render-batch-size "${RENDER_BATCH_SIZE:-96}" --render-workers "${RENDER_WORKERS:-1}"
         --finalize-workers "${FINALIZE_WORKERS:-4}" "${OUTPUT[@]}" "${MAX[@]}" "${EXTRA[@]}"
-        --refinalize --retry-failures --contact-only --device gpu)
+        --refinalize --retry-failures --device gpu)
 export PYTHONUNBUFFERED=1
-echo "== prepare ($RUN_DIR)"; "$PYTHON" -u "$ENTRY" "${COMMON[@]}" --stage prepare
-echo "== render";             "$PYTHON" -u "$ENTRY" "${COMMON[@]}" --stage render
+echo "== prepare ($RUN_DIR)"; "$PYTHON" -u -m "$ENTRY" "${COMMON[@]}" --stage prepare
+echo "== render";             "$PYTHON" -u -m "$ENTRY" "${COMMON[@]}" --stage render
 echo "== harmonize";          "${PCTNET_PYTHON:-$PYTHON}" -u "$HERE/run_pctnet_folder.py" "$RUN_DIR/images" \
                                   --output-root "$RUN_DIR/final_images" --mask-threshold 250 --device 0
 if (( ! KEEP )); then

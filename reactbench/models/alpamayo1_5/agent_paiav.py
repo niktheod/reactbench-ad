@@ -14,7 +14,7 @@ import torch
 from PIL import Image
 
 from ... import paths
-from ...analysis.cot.cot_swap import forced_cot_prefix
+from .forced_cot import forced_cot_prefix
 
 
 ALPAMAYO_REPO_ROOT = Path(
@@ -268,7 +268,7 @@ class AlpamayoAgent:
         device = torch.device(self.device)
         if device.type == "cuda" and not torch.cuda.is_available():
             raise RuntimeError(
-                "CUDA is unavailable. Run Alpamayo evaluation in a GPU Slurm job."
+                "Alpamayo evaluation requires a CUDA GPU."
             )
         if self.attn_implementation == "flash_attention_2":
             try:

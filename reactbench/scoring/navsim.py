@@ -97,23 +97,11 @@ def postprocess_evaluation(result_dir, mode="score", workers=1):
 
 def inventory_result(root):
     inventory = saved.inventory_result(root)
-    records = {str(r["token"]): r for r in read_json(Path(root) / "metrics/per_sample.json", [])}
     for task in inventory["tasks"]:
         if task["dataset"] != "navsim":
             task.update(status="inapplicable", reason="ReactNAV scoring requires a NAVSIM scene")
         if task["world"] == "clean":
             task["actor_motion"] = None
-        row = records.get(task["token"], {})
-        if inventory["mode"] == "fixed_cots":
-            from ..analysis.cot.fixed_cot import CONDITIONS
-            for name in CONDITIONS:
-                task["pairs"][f"intervention/{name}"] = ["natural_edited", name]
-        for name, c in row.get("contrasts", {}).items():
-            if "from_condition" in c and "to_condition" in c:
-                task["pairs"][f"contrast/{name}"] = [c["from_condition"], c["to_condition"]]
-        for name, c in row.get("replay_controls", {}).items():
-            if c.get("reference_condition"):
-                task["pairs"][f"replay/{name}"] = [c["reference_condition"], name]
         task["input_fingerprint"] = digest({k: v for k, v in task.items() if k != "input_fingerprint"})
     return inventory
 
@@ -156,10 +144,10 @@ def score_task(task, worlds, config, contract):
         speed = float(np.linalg.norm(velocity))
         longitudinal = float(velocity @ acceleration / speed) if speed >= .01 else None
         row["groups"].update(speed_mps=speed, longitudinal_acceleration_mps2=longitudinal)
-        # Original-scene means do not use the insertion cohort's frozen motion bins.
+        # Motion bins label the edited (insertion) rows only.
         if task["world"] == "augmented":
-            row["groups"].update(speed_bin_kmh=speed_bin_label(speed * 3.6, bin_spec="navsim"),
-                                 acceleration_bin_mps2=acceleration_bin_label(longitudinal, bin_spec="navsim") if longitudinal is not None else None)
+            row["groups"].update(speed_bin_kmh=speed_bin_label(speed * 3.6),
+                                 acceleration_bin_mps2=acceleration_bin_label(longitudinal) if longitudinal is not None else None)
         map_context = MapContext(task["token"], world, config["work_root"])
         cache_root = Path(config["work_root"]) / "scores_at_fault"
         scores, pending = {}, defaultdict(list)

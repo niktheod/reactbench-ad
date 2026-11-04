@@ -28,8 +28,7 @@ import time
 from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Sequence
 
 
-# One native thread per process prevents NumPy/OpenCV oversubscription when the
-# classifier is launched without the Slurm wrapper.
+# One native thread per process prevents NumPy/OpenCV oversubscription.
 for _thread_variable in (
     "OMP_NUM_THREADS",
     "MKL_NUM_THREADS",

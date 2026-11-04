@@ -238,13 +238,10 @@ def main(argv=None):
                     stage = "metrics"
                     # Bookkeeping only; every metric comes from protocol V2 scoring (postprocess_evaluation).
                     from ...scoring.records import sample_record
-                    from ...scoring.motion_bins import NAVSIM_BIN_SPEC_ID
                     context = loader.metric_context(token)
                     metrics = sample_record(
-                        bin_spec=NAVSIM_BIN_SPEC_ID, token=token, output_stem=token,
-                        original_trajectory=cached[token], edited_trajectory=poses,
-                        actor_motion=context["actor_motion"], interval_length_s=interval,
-                        speed_mps=context["speed_mps"],
+                        token=token, output_stem=token,
+                        actor_motion=context["actor_motion"], speed_mps=context["speed_mps"],
                         longitudinal_acceleration_mps2=context["longitudinal_acceleration_mps2"])
                     records.append({**metrics, **basic, **context})
             except Exception as exc:

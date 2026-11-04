@@ -8,26 +8,34 @@ inserted object's footprint at any time of the metric cache's horizon (for stand
 its footprint; for walkers, the area they cover), so a stopped ego is never reached by the
 object. When a_max caps the deceleration the stop falls inside the margin, or the contact
 happens at the lowest reachable speed. Nothing ranks or selects targets: contacts and stock
-PDMS are recorded for the audit only. Original and benign samples keep their GT; training
-reuses the experiment-16 dataset wrapper and sampler unchanged (ablation views without
-originals use ``EditsOnlySampler``).
+PDMS are recorded for the audit only. Original and benign samples keep their GT. Each training
+epoch is every edit plus a disjoint chunk of the originals (``EpochOriginalSampler``).
 """
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import gzip
 import hashlib
 import json
+import lzma
 import math
 from pathlib import Path
+import pickle
 
 import numpy as np
-from torch.utils.data import DistributedSampler
+import torch
+from torch.utils.data import Dataset, DistributedSampler
 
-from .recogdrive_mixed_data import KINEMATIC_SFT_PROTOCOL, KINEMATIC_SFT_TIMESTEPS, SFT_ACTORS, digest
+from .recogdrive_mixed_data import KINEMATIC_SFT_PROTOCOL, KINEMATIC_SFT_TIMESTEPS, SFT_ACTORS, check_file, digest
 
 TARGETS_PROTOCOL = "recogdrive-kinematic-sft-targets-v1"
-# Ablation views without originals (training_kinds): each epoch is every edit, shuffled by (seed, epoch).
-EDITS_ONLY_SAMPLER = "all-edits-seeded-shuffle-without-originals-v1"
+SAMPLER = "all-edits-plus-disjoint-original-chunks-of-seeded-pool-passes-v2"
+POOL_ORDER_KEY = 1 << 32  # Seeds the passes' pool permutations apart from the per-epoch shuffles.
+# (stored name, PDMResults field) of the stock PDMS subscores.
+PDMS_FIELDS = (("nc", "no_at_fault_collisions"), ("dac", "drivable_area_compliance"), ("ep", "ego_progress"),
+               ("ttc", "time_to_collision_within_bound"), ("comfort", "comfort"),
+               ("ddc", "driving_direction_compliance"))
+CONTACT_FIELDS = ("inserted", "logged_behind", "logged_other")
 WAYPOINT_TIMES_S = np.arange(1, 9) * 0.5  # the eight 2 Hz poses
 STATE_TIMES_S = np.arange(41) * 0.1  # 10 Hz motion over the 4 s horizon (contacts)
 SPEED_BIN_EDGES_KMH = (0., 5., 10., 15., 20., 25., 30., 35., 40.)  # the last bin is open
@@ -53,7 +61,7 @@ class KinematicSettings:
 
 
 def reconstruction():
-    """The minimum-jerk reconstruction settings (waypoint merging, at-rest speed) of the hazard SFT."""
+    """The minimum-jerk reconstruction settings (waypoint merging, at-rest speed) of the GT path."""
     from navsim.evaluate.minimum_jerk_pdm_score import MinimumJerkRewardConfig
     return MinimumJerkRewardConfig().reconstruction()
 
@@ -62,9 +70,8 @@ def target_conventions(settings):
     """Conventions and code identity recorded in the artifact (audit only; never compared)."""
     from navsim.evaluate import minimum_jerk_trajectory, pdm_score
     from navsim.planning.simulation.planner.pdm_planner.scoring import pdm_scorer
-    from . import recogdrive_hazard_sft
     code = {Path(module.__file__).name: hashlib.sha256(Path(module.__file__).read_bytes()).hexdigest()
-            for module in (minimum_jerk_trajectory, pdm_score, pdm_scorer, recogdrive_hazard_sft)}
+            for module in (minimum_jerk_trajectory, pdm_score, pdm_scorer)}
     code[Path(__file__).name] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     config = reconstruction()
     return {"version": 1, "path": "minimum-jerk-reconstruction-cubic-path-of-merged-gt-waypoints-v1",
@@ -75,7 +82,7 @@ def target_conventions(settings):
             "first_contact": "pacifica-footprint-along-path-grid-then-bisection-v1",
             "profile": "constant-deceleration-from-t0-then-hold-v1", "heading": "path-tangent",
             "gt_kept": "gt-with-logged-heading-when-no-path-or-no-contact-v1",
-            "contacts": {"gt": "minimum-jerk-reconstruction-10hz-v1", "target": "exact-target-motion-10hz-v1",
+            "contacts": {"target": "exact-target-motion-10hz-v1",
                          "executed": "pdm-simulator-10hz-v1",
                          "rule": "any-footprint-overlap-excluding-red-lights-and-initial-overlaps-v1"},
             "pdms": {"sampling": [40, 0.1], "execution": "pdm-closed-reference-lqr-bicycle-v1"},
@@ -207,6 +214,98 @@ def profile_arc(v0, profile, times):
     return v0 * t - 0.5 * profile["a"] * t * t if profile["a"] > 0 else np.zeros_like(t)
 
 
+# --- Inputs and stock PDMS ------------------------------------------------------------------------
+
+def sample_file(sample, name):
+    """Frozen stamp of one prepared file: ``internvl_feature.gz``, ``trajectory_target.gz`` or ``metric``."""
+    matches = [r for r in sample["files"]
+               if (r["path"] == sample["metric_path"] if name == "metric" else Path(r["path"]).name == name)]
+    if len(matches) != 1:
+        raise ValueError(f"Expected one prepared {name} file for {sample['feature_path']}")
+    return matches[0]
+
+
+def load_gt(reference):
+    """Logged GT poses (x, y, heading) at 0.5-4.0 s from a stamped ``trajectory_target.gz``."""
+    check_file(reference)
+    with gzip.open(reference["path"], "rb") as handle:
+        gt = np.asarray(pickle.load(handle)["trajectory"], dtype=np.float64)
+    if gt.shape != (8, 3) or not np.isfinite(gt).all():
+        raise ValueError(f"Invalid GT trajectory: {reference['path']}")
+    return gt
+
+
+def load_metric_cache(reference):
+    check_file(reference)
+    with lzma.open(reference["path"], "rb") as handle:
+        return pickle.load(handle)
+
+
+def stock_pdms():
+    """Unmodified NAVSIM PDMS: 4 s at 10 Hz, PDM-Closed reference, LQR + bicycle execution, weights 5/5/2."""
+    from nuplan.planning.simulation.trajectory.trajectory_sampling import TrajectorySampling
+    from navsim.planning.simulation.planner.pdm_planner.scoring.pdm_scorer import PDMScorer, PDMScorerConfig
+    from navsim.planning.simulation.planner.pdm_planner.simulation.pdm_simulator import PDMSimulator
+    sampling = TrajectorySampling(num_poses=40, interval_length=0.1)
+    return sampling, PDMSimulator(sampling), PDMScorer(sampling, PDMScorerConfig())
+
+
+def pdms_result(metric_cache, poses, stock=None):
+    """Stock executed PDMS of one trajectory scored on its own (``pdm_score``, PDM-Closed reference)."""
+    from navsim.common.dataclasses import Trajectory
+    from navsim.evaluate.pdm_score import pdm_score
+    sampling, simulator, scorer = stock_pdms() if stock is None else stock
+    result = pdm_score(metric_cache, Trajectory(np.asarray(poses, dtype=np.float64)), sampling, simulator, scorer)
+    values = {"score": float(result.score), **{name: float(getattr(result, field)) for name, field in PDMS_FIELDS}}
+    if not all(math.isfinite(value) for value in values.values()):
+        raise ValueError("Nonfinite stock PDMS or subscore")
+    return values
+
+
+def executed_states(metric_cache, poses, stock=None):
+    """The trajectory's LQR + bicycle states exactly as ``pdm_score`` simulates them (beside the reference)."""
+    from navsim.common.dataclasses import Trajectory
+    from navsim.evaluate.pdm_score import get_trajectory_as_array, transform_trajectory
+    sampling, simulator, _ = stock_pdms() if stock is None else stock
+    initial = metric_cache.ego_state
+    proposals = np.stack([
+        get_trajectory_as_array(metric_cache.trajectory, sampling, initial.time_point),
+        get_trajectory_as_array(transform_trajectory(Trajectory(np.asarray(poses, dtype=np.float64)), initial),
+                                sampling, initial.time_point)])
+    return simulator.simulate_proposals(proposals, initial)[1]
+
+
+def track_contacts(states, observation, inserted_token):
+    """Which tracks the ego footprint touches at 0-4 s, any fault: the inserted actor, and logged actors
+    behind the ego (centroid within 30 deg of straight behind the rear axle) or elsewhere. Red lights and
+    tracks already overlapping the ego at 0 s (stock initial collisions) are skipped. None without states."""
+    if states is None:
+        return None
+    from nuplan.common.actor_state.state_representation import StateSE2
+    from nuplan.common.actor_state.vehicle_parameters import get_pacifica_parameters
+    from nuplan.planning.simulation.observation.idm.utils import is_agent_behind
+    from navsim.planning.simulation.planner.pdm_planner.utils.pdm_array_representation import (
+        coords_array_to_polygon_array, state_array_to_coords_array)
+    from navsim.planning.simulation.planner.pdm_planner.utils.pdm_enums import StateIndex
+    polygons = coords_array_to_polygon_array(state_array_to_coords_array(states[None], get_pacifica_parameters()))[0]
+    result = dict.fromkeys(CONTACT_FIELDS, False)
+    seen = set(observation.collided_track_ids)
+    for time_idx, polygon in enumerate(polygons):
+        occupancy = observation[time_idx]
+        for token in occupancy.intersects(polygon):
+            if observation.red_light_token in token or token in seen:
+                continue
+            seen.add(token)
+            if token == inserted_token:
+                result["inserted"] = True
+                continue
+            centroid = occupancy[token].centroid
+            behind = is_agent_behind(StateSE2(*states[time_idx, StateIndex.STATE_SE2]),
+                                     StateSE2(centroid.x, centroid.y, 0.))
+            result["logged_behind" if behind else "logged_other"] = True
+    return result
+
+
 # --- Targets -----------------------------------------------------------------------------------
 
 def kinematic_target(metric_cache, gt, inserted_token, settings=None):
@@ -214,7 +313,6 @@ def kinematic_target(metric_cache, gt, inserted_token, settings=None):
 
     The GT is kept (logged heading) when it has no usable path or never touches the object.
     """
-    from . import recogdrive_hazard_sft as sft
     settings = KinematicSettings() if settings is None else settings
     gt = np.asarray(gt, dtype=np.float64)
     if gt.shape != (8, 3) or not np.isfinite(gt).all():
@@ -222,13 +320,11 @@ def kinematic_target(metric_cache, gt, inserted_token, settings=None):
     observation = metric_cache.observation
     if inserted_token not in observation.unique_objects:
         raise ValueError(f"The metric cache does not track the inserted object {inserted_token}")
-    _, reward, _ = sft.reward_settings()
     pose = initial_pose(metric_cache)
     v0 = float(metric_cache.ego_state.dynamic_car_state.rear_axle_velocity_2d.x)
     record = {"v0": v0, "d": None, "delta_s": None, "a": None, "a_required": None, "capped": None,
               "t_stop": None, "stop_arc": None, "path_length": None, "travel_m": None, "executed_travel_m": None}
-    contacts = {"gt": sft.contacts(sft.planned_states(metric_cache, gt, reward), observation, inserted_token),
-                "target": None, "target_executed": None}
+    contacts = {"target": None, "target_executed": None}
     path, reason = gt_path(gt[:, :2])
     if path is not None:
         record["path_length"] = float(path.length)
@@ -241,15 +337,15 @@ def kinematic_target(metric_cache, gt, inserted_token, settings=None):
     record.update(d=float(d), delta_s=float(d - settings.margin_m), **profile)
     target = path_poses(path, profile_arc(v0, profile, WAYPOINT_TIMES_S))
     states = state_array(to_global(path_poses(path, profile_arc(v0, profile, STATE_TIMES_S)), pose))
-    stock = sft.stock_pdms()
-    contacts["target"] = sft.contacts(states, observation, inserted_token)
-    executed = sft.executed_states(metric_cache, target, stock)
-    contacts["target_executed"] = sft.contacts(executed, observation, inserted_token)
+    stock = stock_pdms()
+    contacts["target"] = track_contacts(states, observation, inserted_token)
+    executed = executed_states(metric_cache, target, stock)
+    contacts["target_executed"] = track_contacts(executed, observation, inserted_token)
     # Distance travelled in 4 s by the target and by its LQR + bicycle execution (audit of the tracking lag).
     record.update(travel_m=float(profile_arc(v0, profile, [STATE_TIMES_S[-1]])[0]),
                   executed_travel_m=travel_distance(executed))
     return target, {"origin": "kinematic", "gt_kept_reason": None, **record, "contacts": contacts,
-                    "pdms": sft.pdms_result(metric_cache, target, stock)}
+                    "pdms": pdms_result(metric_cache, target, stock)}
 
 
 def travel_distance(states):
@@ -257,14 +353,6 @@ def travel_distance(states):
     from navsim.planning.simulation.planner.pdm_planner.utils.pdm_enums import StateIndex
     points = np.asarray(states, dtype=np.float64)[:, StateIndex.POINT]
     return float(np.linalg.norm(np.diff(points, axis=0), axis=1).sum())
-
-
-def benign_gt_contacts(metric_cache, gt, inserted_token):
-    """Contacts of the GT's reconstructed motion in a benign world (its object must stay clear)."""
-    from . import recogdrive_hazard_sft as sft
-    _, reward, _ = sft.reward_settings()
-    states = sft.planned_states(metric_cache, np.asarray(gt, dtype=np.float64), reward)
-    return sft.contacts(states, metric_cache.observation, inserted_token)
 
 
 # --- Audit ------------------------------------------------------------------------------------
@@ -288,11 +376,10 @@ def speed_bin(v0):
 def _group_summary(rows):
     targets = [r for r in rows if r["origin"] == "kinematic"]
     count = {f"{who}_{field}": sum(bool((r["contacts"][who] or {}).get(field)) for r in rows)
-             for who in ("gt", "target", "target_executed") for field in ("inserted", "logged_behind", "logged_other")}
+             for who in ("target", "target_executed") for field in CONTACT_FIELDS}
     pdms = [r["pdms"] for r in targets if r["pdms"] is not None]
     return {"samples": len(rows), "kinematic_targets": len(targets),
             "gt_kept": {reason: sum(r["gt_kept_reason"] == reason for r in rows) for reason in GT_KEPT_REASONS},
-            "gt_contact_unchecked": sum(r["contacts"]["gt"] is None for r in rows),
             "capped": sum(bool(r["capped"]) for r in targets),
             "stops_within_horizon": sum(r["t_stop"] <= 4. for r in targets),
             "deceleration_mps2_p10_p50_p90": _quantiles([r["a"] for r in targets]),
@@ -311,18 +398,6 @@ def target_summary(samples):
         for key in ("all", f"variant/{record['variant']}", f"speed_kmh/{speed_bin(record['v0'])}"):
             groups.setdefault(key, []).append(record)
     return {key: _group_summary(rows) for key, rows in sorted(groups.items())}
-
-
-def benign_summary(records):
-    rows = list(records.values())
-    by_variant = {}
-    for row in rows:
-        by_variant.setdefault(row["variant"], []).append(row)
-
-    def counts(group):
-        return {"samples": len(group), "unchecked": sum(r["gt_contacts"] is None for r in group),
-                "gt_touches_object": sum(bool((r["gt_contacts"] or {}).get("inserted")) for r in group)}
-    return {"all": counts(rows), **{f"variant/{k}": counts(v) for k, v in sorted(by_variant.items())}}
 
 
 # --- Training inputs --------------------------------------------------------------------------
@@ -365,31 +440,85 @@ def load_targets(manifest):
     return targets
 
 
-class EditsOnlySampler(DistributedSampler):
-    """Every training sample of a view without originals (all edits) once per epoch.
+class HazardTargetDataset(Dataset):
+    """Training samples in sorted token order; hazardous targets replaced by the frozen SFT targets.
 
-    The epoch's index list is the edits shuffled by (seed, epoch), identical on every rank, then
-    padded by repetition and sharded like ``DistributedSampler``: the order ``EpochOriginalSampler``
-    would give with an empty original chunk. Lightning keeps it and calls ``set_epoch``.
+    The sorted order makes sampler indices independent of directory listing order on each rank.
+    Original and benign samples keep their cached GT; replacements keep the GT tensor dtype.
     """
 
-    def __init__(self, dataset, *, seed, num_replicas, rank):
+    def __init__(self, base, kinds, targets):
+        self.base = base
+        self.tokens = sorted(base.tokens)
+        self._valid_cache_paths = base._valid_cache_paths
+        self._base_index = {token: index for index, token in enumerate(base.tokens)}
+        if len(self._base_index) != len(self.tokens):
+            raise ValueError("Duplicate training tokens")
+        self.kinds = {token: kinds[token] for token in self.tokens}
+        hazardous = [token for token in self.tokens if self.kinds[token] == "hazardous"]
+        missing = [token for token in hazardous if token not in targets]
+        if missing:
+            raise ValueError(f"Hazardous training samples without SFT targets: {missing[:5]}")
+        self.targets = {token: np.array(targets[token], dtype=np.float64) for token in hazardous}
+
+    def __len__(self):
+        return len(self.tokens)
+
+    def __getitem__(self, index):
+        token = self.tokens[index]
+        features, targets, loaded = self.base[self._base_index[token]]
+        if loaded != token:
+            raise RuntimeError(f"Cached sample identity mismatch: {loaded} != {token}")
+        if token in self.targets:
+            gt = targets["trajectory"]
+            if tuple(gt.shape) != (8, 3):
+                raise ValueError(f"Unexpected cached GT shape for {token}: {tuple(gt.shape)}")
+            targets = {**targets, "trajectory": torch.tensor(self.targets[token], dtype=gt.dtype)}
+        return features, targets, token
+
+
+class EpochOriginalSampler(DistributedSampler):
+    """Every edited sample plus ``originals_per_epoch`` originals, disjoint across epochs.
+
+    The view's originals (the pool) are permuted once per pass, seeded by (seed, pass), and each
+    pass is cut into ``len(pool) // originals_per_epoch`` disjoint chunks, one per epoch; later
+    epochs start a new pass. A pool of exactly k x originals_per_epoch therefore uses every
+    original once over k epochs. The epoch's index list depends only on (seed, epoch), is
+    identical on every rank, and is shuffled and then sharded like ``DistributedSampler`` (tail
+    padded by repetition). Being a DistributedSampler, Lightning keeps it and calls
+    ``set_epoch`` before each epoch.
+    """
+
+    def __init__(self, dataset, originals_per_epoch, *, seed, num_replicas, rank):
         super().__init__(dataset, num_replicas=num_replicas, rank=rank, shuffle=False, seed=seed, drop_last=False)
         kinds = [dataset.kinds[token] for token in dataset.tokens]
-        if not kinds or "original" in kinds:
-            raise ValueError("The edits-only sampler requires edited samples and no originals")
-        self.edited = np.arange(len(kinds))
-        self.epoch_size = len(self.edited)
+        self.edited = np.flatnonzero([kind != "original" for kind in kinds])
+        self.originals = np.flatnonzero([kind == "original" for kind in kinds])
+        if (type(originals_per_epoch) is not int or not 0 < originals_per_epoch <= len(self.originals)
+                or not len(self.edited)):
+            raise ValueError("originals_per_epoch must be a positive integer up to the number of originals, "
+                             "with edited samples present")
+        self.originals_per_epoch = originals_per_epoch
+        self.disjoint_epochs = len(self.originals) // originals_per_epoch  # Epochs per pass over the pool.
+        self.epoch_size = len(self.edited) + originals_per_epoch
         self.num_samples = math.ceil(self.epoch_size / self.num_replicas)
         self.total_size = self.num_samples * self.num_replicas
+
+    def epoch_originals(self, epoch):
+        """The dataset indices of one epoch's originals: one chunk of its pass's pool permutation."""
+        if type(epoch) is not int or epoch < 0:
+            raise ValueError("epoch must be a nonnegative integer")
+        epoch_pass, chunk = divmod(epoch, self.disjoint_epochs)
+        order = np.random.default_rng([int(self.seed), POOL_ORDER_KEY, epoch_pass]).permutation(self.originals)
+        return order[chunk * self.originals_per_epoch:(chunk + 1) * self.originals_per_epoch]
 
     def epoch_indices(self, epoch=None):
         """The full (unsharded, padded) index list of one epoch."""
         epoch = self.epoch if epoch is None else epoch
-        if isinstance(epoch, bool) or not isinstance(epoch, (int, np.integer)) or epoch < 0:
-            raise ValueError("epoch must be a nonnegative integer")
-        indices = self.edited.copy()
-        np.random.default_rng([int(self.seed), int(epoch)]).shuffle(indices)
+        chosen = self.epoch_originals(int(epoch))
+        rng = np.random.default_rng([int(self.seed), int(epoch)])
+        indices = np.concatenate((self.edited, chosen))
+        rng.shuffle(indices)
         indices = indices.tolist()
         padding = self.total_size - len(indices)
         while padding > 0:
@@ -404,41 +533,30 @@ class EditsOnlySampler(DistributedSampler):
         return self.num_samples
 
 
+
+
 def sampler_protocol(manifest, originals_per_epoch, seed):
     """Recorded in the mixed-training protocol, so a resume cannot change the population or draw."""
-    from .recogdrive_hazard_sft import SAMPLER
     edits = manifest["counts"]["hazardous"] + manifest["counts"]["benign"]
     originals = manifest["counts"]["original"]
-    if not originals and originals_per_epoch != 0:
-        raise ValueError("A view without originals draws none per epoch")
-    protocol = {"version": 2, "sampler": SAMPLER if originals else EDITS_ONLY_SAMPLER, "seed": seed,
-                "originals_per_epoch": originals_per_epoch, "epoch_size": edits + originals_per_epoch,
-                "originals": originals, "disjoint_epochs": originals // originals_per_epoch if originals else None,
-                "original_pool": manifest.get("original_pool"), "variant_selection": manifest["variant_selection"],
-                "targets": manifest["kinematic_targets"]["artifact_sha256"], "target_rule": TARGETS_PROTOCOL,
-                "target_settings": manifest["kinematic_targets"]["settings"],
-                "loss": "stage2-epsilon-mse-per-sample-mean-v1"}
-    if "training_kinds" in manifest:  # ablation views only, so the default record is unchanged
-        protocol["training_kinds"] = manifest["training_kinds"]
-    return protocol
+    return {"version": 2, "sampler": SAMPLER, "seed": seed,
+            "originals_per_epoch": originals_per_epoch, "epoch_size": edits + originals_per_epoch,
+            "originals": originals, "disjoint_epochs": originals // originals_per_epoch,
+            "original_pool": manifest.get("original_pool"), "variant_selection": manifest["variant_selection"],
+            "targets": manifest["kinematic_targets"]["artifact_sha256"], "target_rule": TARGETS_PROTOCOL,
+            "target_settings": manifest["kinematic_targets"]["settings"],
+            "loss": "stage2-epsilon-mse-per-sample-mean-v1"}
 
 
 def training_inputs(manifest, base, originals_per_epoch, *, seed, num_replicas, rank):
     """(dataset, sampler, sampler record) of a kinematic SFT view's training split ``base``.
 
-    The experiment-16 wrapper supplies the frozen hazardous targets. ``originals_per_epoch`` None
-    selects the number of hazardous edits (0 for a view without originals); such views use the
-    edits-only sampler, all others the experiment-16 ``EpochOriginalSampler``.
+    The dataset supplies the frozen hazardous targets. ``originals_per_epoch`` None selects the
+    number of hazardous edits.
     """
-    from . import recogdrive_hazard_sft as sft
     if originals_per_epoch is None:
-        originals_per_epoch = manifest["counts"]["hazardous"] if manifest["counts"]["original"] else 0
-    data = sft.HazardTargetDataset(
+        originals_per_epoch = manifest["counts"]["hazardous"]
+    data = HazardTargetDataset(
         base, {t: s["kind"] for t, s in manifest["samples"].items() if s["split"] == "train"}, load_targets(manifest))
-    if manifest["counts"]["original"]:
-        sampler = sft.EpochOriginalSampler(data, originals_per_epoch, seed=seed, num_replicas=num_replicas, rank=rank)
-    elif originals_per_epoch == 0:
-        sampler = EditsOnlySampler(data, seed=seed, num_replicas=num_replicas, rank=rank)
-    else:
-        raise ValueError("A kinematic SFT view without originals requires 0 originals per epoch")
+    sampler = EpochOriginalSampler(data, originals_per_epoch, seed=seed, num_replicas=num_replicas, rank=rank)
     return data, sampler, sampler_protocol(manifest, originals_per_epoch, seed)

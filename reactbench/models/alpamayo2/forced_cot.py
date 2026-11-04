@@ -9,9 +9,11 @@ also feeds ``<|traj_future_start|>`` through the VLM before stopping, so the
 cache length and expert position offset match a natural rollout.
 
 The natural prompt construction, paired seeding and rollout are reused by
-temporarily overriding three instance attributes. This module stays separate
-from ``inference.py``/``runner.py`` because their source hashes are part of the
-original-cache signature: editing them would invalidate every saved cache.
+temporarily overriding three instance attributes, so the natural runner
+(``inference.py``/``runner.py``) needs no forced-CoT code; Alpamayo 1.5's format
+is in ``models/alpamayo1_5/forced_cot.py``. Note that the original-cache signature
+(``runner.signature_for``) hashes these runner sources and Alpamayo 1.5's
+``agent_paiav.py``/``agent_navsim.py``, so editing any of them changes it.
 """
 from __future__ import annotations
 
