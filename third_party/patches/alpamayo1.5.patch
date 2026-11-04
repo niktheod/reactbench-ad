@@ -1,0 +1,72 @@
+diff --git a/src/alpamayo1_5/diffusion/flow_matching.py b/src/alpamayo1_5/diffusion/flow_matching.py
+index 90c0ec1..5a0eed3 100644
+--- a/src/alpamayo1_5/diffusion/flow_matching.py
++++ b/src/alpamayo1_5/diffusion/flow_matching.py
+@@ -62,6 +62,7 @@ class FlowMatching(BaseDiffusion):
+         use_classifier_free_guidance: bool | None = None,
+         inference_guidance_weight: float | None = None,
+         temperature: float = 1.0,
++        diffusion_seed: int | None = None,
+         *args,
+         **kwargs,
+     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+@@ -82,6 +83,8 @@ class FlowMatching(BaseDiffusion):
+             inference_guidance_weight: The weight of the guidance during inference. (override self.inference_guidance_weight)
+             temperature: The temperature for controlling the initial noise. Note that using
+                 temperature < 1.0 will result in a more stable sampling with less diversity.
++            diffusion_seed: Optional seed for a dedicated random generator used only to draw
++                the initial diffusion noise.
+ 
+         Returns:
+             torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+@@ -107,6 +110,7 @@ class FlowMatching(BaseDiffusion):
+                 inference_guidance_weight=inference_guidance_weight,
+                 use_classifier_free_guidance=use_classifier_free_guidance,
+                 temperature=temperature,
++                diffusion_seed=diffusion_seed,
+             )
+         else:
+             raise ValueError(f"Invalid integration method: {int_method}")
+@@ -146,6 +150,7 @@ class FlowMatching(BaseDiffusion):
+         inference_guidance_weight: float | None = None,
+         use_classifier_free_guidance: bool | None = None,
+         temperature: float = 1.0,
++        diffusion_seed: int | None = None,
+     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+         """Euler integration for flow matching.
+ 
+@@ -163,12 +168,33 @@ class FlowMatching(BaseDiffusion):
+             use_classifier_free_guidance: Whether to use classifier free guidance.
+             temperature: The temperature for controlling the initial noise. Note that using
+                 temperature < 1.0 will result in a more stable sampling with less diversity.
++            diffusion_seed: Optional seed for a dedicated random generator used only to draw
++                the initial diffusion noise.
+         Returns:
+             torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+                 The final sampled tensor [B, *x_dims] if return_all_steps is False,
+                 otherwise a tuple of all sampled tensors [B, T, *x_dims] and the time steps [T].
+         """
+-        x = torch.randn(batch_size, *self.x_dims, device=device) * temperature
++        generator = None
++        if diffusion_seed is not None:
++            diffusion_seed = int(diffusion_seed)
++            if not 0 <= diffusion_seed <= (1 << 63) - 1:
++                raise ValueError(
++                    "diffusion_seed must be between 0 and 2**63 - 1, "
++                    f"got {diffusion_seed}"
++                )
++            generator = torch.Generator(device=device)
++            generator.manual_seed(diffusion_seed)
++
++        x = (
++            torch.randn(
++                batch_size,
++                *self.x_dims,
++                device=device,
++                generator=generator,
++            )
++            * temperature
++        )
+         time_steps = torch.linspace(0.0, 1.0, inference_step + 1, device=device)
+         n_dim = len(self.x_dims)
+         if return_all_steps:

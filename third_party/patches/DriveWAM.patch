@@ -1,0 +1,42 @@
+--- a/environment.yml
++++ b/environment.yml
+@@ -35,7 +35,7 @@
+     - psutil==7.2.2
+ 
+     # NavSim evaluation (optional)
+-    - nuplan-devkit==1.2.0
++    - "nuplan-devkit @ git+https://github.com/motional/nuplan-devkit@nuplan-devkit-v1.2"
+     - shapely==2.1.2
+     - pyquaternion==0.9.9
+     - geopandas==1.1.3
+--- a/src/modules/model.py
++++ b/src/modules/model.py
+@@ -26,15 +26,25 @@
+ )
+ from functools import partial
+ 
++flash_attn_func = None
++
+ try:
+     from flash_attn_interface import flash_attn_func
+-except:
+-    from flash_attn import flash_attn_func
++except ImportError:
++    try:
++        from flash_attn import flash_attn_func
++    except ImportError:
++        pass
+ 
+ __all__ = ['WanTransformer3DModel']
+ 
+ def custom_sdpa(q, k, v):
+-    with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False):
++    with torch.backends.cuda.sdp_kernel(
++        enable_flash=False,
++        enable_math=True,
++        enable_mem_efficient=False,
++        enable_cudnn=False,
++    ):
+         out = F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2),
+                                              v.transpose(1, 2))
+     return out.transpose(1, 2)

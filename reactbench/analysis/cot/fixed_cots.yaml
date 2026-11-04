@@ -1,0 +1,11 @@
+version: 1
+conditions:
+  accelerate: Accelerate since the lane is clear ahead
+  resume_speed: Resume speed since the lane is clear ahead
+  slow_down: Slow down due to the {reason}
+  yield: Yield due to the {reason}
+  immediate_stop: Come to a full stop immediately due to the {reason}
+stop_speed_mps: 0.1
+stop_duration_s: 0.5
+sample_plot_count: 20
+sample_plot_seed: 0

@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "id": "navsim-navtest-filtered-plus-5-v1",
+  "dataset": "navsim",
+  "cohort": {
+    "name": "navtest_filtered_plus_5",
+    "selection": "current ego speed > 5 km/h",
+    "sample_count": 3228,
+    "source": "navsim/planning/script/config/common/train_test_split/scene_filter/navtest_filtered_plus_5.yaml",
+    "source_sha256": "94fc67a84a200934cce118fa56f00f8761a58ba4c8e7684c27aec075c92ee674"
+  },
+  "motion_measurement": {
+    "sampling": "current NAVSIM scene frame",
+    "speed_kmh": "hypot(vx, vy) * 3.6",
+    "longitudinal_acceleration_mps2": "dot(a_xy, v_xy) / norm(v_xy)",
+    "minimum_projection_speed_mps": 0.01
+  },
+  "derivation": {
+    "speed_base_width_kmh": 5.0,
+    "acceleration_base_width_mps2": 0.5,
+    "minimum_samples_per_bin": 10,
+    "sparse_merge": "lowest-position sparse bin first; less-populated adjacent bin; left tie-break",
+    "interval_convention": "[lower, upper)"
+  },
+  "dimensions": {
+    "speed_kmh": {
+      "source_value_count": 3228,
+      "bins": [
+        {"lower": 5.0, "upper": 10.0, "label": "[5,10)", "source_count": 325},
+        {"lower": 10.0, "upper": 15.0, "label": "[10,15)", "source_count": 634},
+        {"lower": 15.0, "upper": 20.0, "label": "[15,20)", "source_count": 803},
+        {"lower": 20.0, "upper": 25.0, "label": "[20,25)", "source_count": 680},
+        {"lower": 25.0, "upper": 30.0, "label": "[25,30)", "source_count": 484},
+        {"lower": 30.0, "upper": 35.0, "label": "[30,35)", "source_count": 271},
+        {"lower": 35.0, "upper": 40.0, "label": "[35,40)", "source_count": 31}
+      ]
+    },
+    "longitudinal_acceleration_mps2": {
+      "source_value_count": 3228,
+      "bins": [
+        {"lower": -2.5, "upper": -1.5, "label": "[-2.5,-1.5)", "source_count": 71},
+        {"lower": -1.5, "upper": -1.0, "label": "[-1.5,-1)", "source_count": 310},
+        {"lower": -1.0, "upper": -0.5, "label": "[-1,-0.5)", "source_count": 454},
+        {"lower": -0.5, "upper": 0.0, "label": "[-0.5,0)", "source_count": 853},
+        {"lower": 0.0, "upper": 0.5, "label": "[0,0.5)", "source_count": 933},
+        {"lower": 0.5, "upper": 1.0, "label": "[0.5,1)", "source_count": 460},
+        {"lower": 1.0, "upper": 1.5, "label": "[1,1.5)", "source_count": 132},
+        {"lower": 1.5, "upper": 2.5, "label": "[1.5,2.5)", "source_count": 15}
+      ]
+    }
+  }
+}

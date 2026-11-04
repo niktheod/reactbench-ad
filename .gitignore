@@ -1,0 +1,22 @@
+# Local configuration and generated data
+/configs/paths.yaml
+/outputs/
+/checkpoints/
+/datasets/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
+# Fetched by third_party/setup.sh
+third_party/alpamayo1.5/
+third_party/alpamayo2/
+third_party/AutoVLA/
+third_party/DriveWAM/
+third_party/SimWAM/
+third_party/blender-*/
+# Downloaded on first use by libcom
+reactbench/compositing/harmonization/libcom/image_harmonization/pretrained_models/
+/assets/

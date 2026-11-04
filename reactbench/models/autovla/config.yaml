@@ -1,0 +1,34 @@
+# AutoVLA (AutoVLA_PDMS_89 checkpoint: SFT + reinforcement fine-tuning with the PDMS reward), fast mode.
+name: autovla
+_target_: navsim.agents.autovla_agent.AutoVLAAgent
+_convert_: all
+
+trajectory_sampling:
+  _target_: nuplan.planning.simulation.trajectory.trajectory_sampling.TrajectorySampling
+  _convert_: all
+  time_horizon: 5
+  interval_length: 0.5
+
+# AutoVLA predicts five seconds; every metric uses the common four-second horizon.
+metric_horizon_s: 4.0
+
+# AutoVLA keeps do_sample=true. A stable per-token seed is derived from this base and reset before
+# both original and edited generation, so each pair shares its sampling randomness.
+generation_seed_base: 42
+
+lora_conf:
+  use_lora: false
+  task_type: CAUSAL_LM
+  target_modules:
+    - q_proj
+    - v_proj
+    - k_proj
+    - o_proj
+  r: 8
+  lora_alpha: 8
+  lora_dropout: 0.1
+  bias: none
+
+checkpoint_path: {checkpoints}/autovla/AutoVLA_PDMS_89.ckpt
+sensor_data_path: {sensor_blobs_test}
+config_path: {third_party}/AutoVLA/config/training/qwen2.5-vl-3B-nuplan-grpo-cot.yaml

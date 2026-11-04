@@ -1,0 +1,30 @@
+# SimWAM Supervised (imitation) checkpoint.
+name: simwam_il
+_target_: reactbench.models.simwam.agent.SimWAMAgent
+checkpoint_path: {checkpoints}/simwam/SimWAM/weights/SimWAM.pt
+checkpoint_repo: H-EmbodVis/SimWAM
+checkpoint_revision: 5d4492937e357e6ca64de128cdccbd25c2b34f30
+upstream_revision: 1433ee7e06a62bd8b89da74455df0d82bda7b726
+upstream_task: navsim_uncond_front_384x672_1e-4
+diffsynth_model_root: {checkpoints}/simwam/diffsynth
+prompt_embedding_dir: {checkpoints}/simwam/text_embeds/navsim
+result_suffix: ""
+device: cuda
+mixed_precision: bf16
+
+# Official action-only navtest settings. The seed is a base for stable
+# per-token noise shared by each original/edited pair; per_token_seed: false
+# reproduces upstream eval_navsim.py, which uses one seed for every sample.
+num_inference_steps: 10
+sigma_shift: null
+rand_device: cpu
+tiled: false
+seed: 0
+per_token_seed: true
+# false: every weight comes from the checkpoint (coverage is enforced), so the
+# Wan2.2 DiT and ActionDiT initialisation files are not needed.
+load_pretrained_init: false
+
+trajectory_sampling:
+  time_horizon: 4
+  interval_length: 0.5

@@ -1,0 +1,7 @@
+hydra:
+  searchpath:
+    - pkg://navsim.planning.script.config.common
+
+defaults:
+  - training_base
+  - _self_

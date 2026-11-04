@@ -1,0 +1,19 @@
+# ReCogDrive VLM after its driving SFT stage: plans the trajectory as text (greedy decoding).
+name: recogdrive_vlm
+backend: vlm
+_target_: reactbench.models.recogdrive.vlm_agent.ReCogDriveVLMAgent
+_convert_: all
+trajectory_sampling:
+  _target_: nuplan.planning.simulation.trajectory.trajectory_sampling.TrajectorySampling
+  _convert_: all
+  time_horizon: 4
+  interval_length: 0.5
+checkpoint_path: {checkpoints}/recogdrive/VLM
+prompt_type: base
+cam_type: single
+device: cuda
+generation_config:
+  do_sample: false
+  num_beams: 1
+  max_new_tokens: 512
+  min_new_tokens: 50

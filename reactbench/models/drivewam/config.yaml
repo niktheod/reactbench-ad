@@ -1,0 +1,21 @@
+# DriveWAM NAVSIM checkpoint (released weights, see README).
+name: drivewam
+_target_: reactbench.models.drivewam.agent.DriveWAMAgent
+_convert_: all
+
+checkpoint_path: {checkpoints}/drivewam/DriveWAM   # the released HF checkpoint (navsim/ subfolder)
+base_model_path: {checkpoints}/drivewam/lingbot-va-base
+config_name: navsim_cfg
+attn_mode: flashattn
+device: cuda:0
+
+# Official DriveWAM NAVSIM rollout defaults. The seed is a base for stable per-token rollout
+# seeds: original and edited members share the same video/action noise.
+num_video_steps: 3
+num_action_steps: 10
+video_denoise_fraction: 0.6
+seed: 0
+
+trajectory_sampling:
+  time_horizon: 4
+  interval_length: 0.5

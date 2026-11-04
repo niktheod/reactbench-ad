@@ -1,0 +1,22 @@
+# ReCogDrive IL checkpoint fine-tuned on ReactTrain (paper section 5).
+name: recogdrive_il_rt
+_target_: navsim.agents.recogdrive.recogdrive_agent.ReCogDriveAgent
+_convert_: all
+trajectory_sampling:
+  _target_: nuplan.planning.simulation.trajectory.trajectory_sampling.TrajectorySampling
+  _convert_: all
+  time_horizon: 4
+  interval_length: 0.5
+checkpoint_path: {checkpoints}/recogdrive/IL_RT/recogdrive_il_rt.ckpt
+vlm_path: {checkpoints}/recogdrive/VLM
+cam_type: single
+grpo: false
+cache_hidden_state: false
+vlm_type: internvl
+dit_type: small
+vlm_size: small
+sampling_method: ddim
+
+# ReCogDrive keeps its stochastic DDIM rollout. A stable seed is derived from this base for every
+# token, and the original/edited members share all initial and per-step diffusion noise.
+diffusion_seed_base: 42

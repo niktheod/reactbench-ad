@@ -1,0 +1,43 @@
+{
+  "method": "v2_outer_contour_04",
+  "archive": "mercedes-benz-gls-x167-2019.zip",
+  "archive_sha256": "203e45443ff6cdd539c4db46e0ffbe18bcfe24ff1314629ce5af83f94bd1a9c3",
+  "member": "source/model (1).glb",
+  "member_sha256": "8eeb7ed4f1c0465f7328c344f90f4040de9ecfb0b46dfedb27a8057f7ed852df",
+  "mesh_name": "mesh_id351",
+  "mesh_index": 185,
+  "node_chain": [
+    144,
+    491,
+    489,
+    286,
+    287
+  ],
+  "native_coordinates": "glTF world transformed to Blender world (x,-z,y)",
+  "attribution": "Mercedes-Benz GLS (X167) 2019 by Merc_TV; downloaded asset states CC Attribution. Preserve creator credit when redistributing derived assets.",
+  "alignment": {
+    "scale": 13.24248903037352,
+    "rear_y": -0.14518286768130245,
+    "center_x": -0.00990026,
+    "roof_z": 0.08979264,
+    "height": 1.823,
+    "dz": 0.003337067570326218
+  },
+  "attachment_parameters": [
+    4.599999999999999,
+    0.031404936521254194,
+    1.084128542762946,
+    0.16931623734502105,
+    0.15649283062020275
+  ],
+  "attachment_fixed_bottom_z_m": 0.75,
+  "dimension_group_m": [
+    5.207,
+    2.157,
+    1.823
+  ],
+  "dimension_tolerance_m": 0.005,
+  "frozen_mesh": "gls_x167_hood.npz",
+  "frozen_mesh_sha256": "a9b77e653625b1b745e753b140275490ccc541d845e2a2c51156ec0884661a8e",
+  "extraction_recipe": "Import the verified GLB in Blender, isolate mesh_id351 instance along node_chain, export world-space vertices (Blender float precision) and triangle faces as v/f arrays in NPZ. Preserve this frozen export; a double-precision glTF re-extraction differs by up to 5.64e-8 native units and can change subpixel fits."
+}

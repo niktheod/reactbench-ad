@@ -1,0 +1,23 @@
+_target_: reactbench.models.alpamayo2.agent_paiav.Alpamayo2Agent
+model_name_or_path: nvidia/Alpamayo2-Super
+model_revision: 00554695e729a6ff0b6281fd2c81b18d06e33dbe
+upstream_revision: 5e7975f4a2100ee8ac1a62b79239bbabefddcbef
+device: cuda
+dtype: bfloat16
+attn_implementation: sdpa
+local_files_only: false
+top_p: 0.98
+top_k: null
+temperature: 0.6
+max_generation_length: 256
+seed: 42
+diffusion_seed_base: 42
+diffusion_kwargs:
+  inference_step: 10
+history_steps: 16
+frames_per_camera: 4
+num_traj_samples: 1
+trajectory_sampling:
+  time_horizon: 6.4
+  interval_length: 0.1
+metric_horizon_s: 4.0

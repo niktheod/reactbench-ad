@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reactbench"
+version = "1.0.0"
+description = "ReactBench: how driving VLAs and world-action models react to objects inserted into their path"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.9"
+# Scoring and summaries; the model, compositing and training stacks have their own environments (envs/).
+dependencies = ["numpy", "scipy", "shapely", "pyyaml"]
+
+[tool.setuptools.packages.find]
+include = ["reactbench*"]

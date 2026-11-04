@@ -1,0 +1,79 @@
+_target_: navsim.agents.recogdrive.recogdrive_agent.ReCogDriveAgent
+_convert_: 'all'
+
+trajectory_sampling:
+  _target_: nuplan.planning.simulation.trajectory.trajectory_sampling.TrajectorySampling
+  _convert_: 'all'
+  time_horizon: 4
+  interval_length: 0.5
+checkpoint_path: ''
+vlm_path: ''
+cam_type: 'single'
+vlm_type: 'internvl'
+dit_type: 'small'
+sampling_method: 'ddim'
+cache_mode: False
+cache_hidden_state: True
+metric_cache_path: ''
+metric_cache_staging_path: null
+reference_policy_checkpoint: ''
+pdm_reward_workers: 1
+vlm_size: 'small'
+train_backbone: false
+grpo: False
+bc_coeff: 0.1
+# Stage-3 initialization only; random requires BC zero and no IL paths.
+planner_initialization: stage2
+# Stage-3 reward only; evaluation PDMS retains its separate 5/5/2 weights.
+training_comfort_weight: 2.0
+training_ep_weight: 10.0
+training_reward_mode: executed
+training_raw_safety_weight: 0.2
+training_raw_contact_speed_weight: 0.05
+training_raw_safety_inputs: null
+# minimum_jerk reward only. TTC/EP/comfort weights
+# come from the training weights above; these settings are frozen in its protocol.
+training_minimum_jerk:
+  contact_weight: 1.0
+  contact_speed_cap_mps: 13.88888888888889  # 50 km/h
+  ttc_horizon_s: 0.9
+  ep_epsilon_m: 1.0
+  merge_distance_m: 0.05  # forward steps only (path geometry); backward waypoints are always merged
+  stopped_initial_speed_mps: 0.05
+  low_speed_threshold_mps: 0.5
+  speed_limit_mps: 22.22222222222222  # 80 km/h, universal
+  speed_limit_ramp: 0.5
+  total_acceleration_limit_mps2: 9.0
+  forward_acceleration_limit_mps2: 4.0
+  curvature_limit_per_m: 0.2
+  feasibility_ramp: 0.2
+  backward_saturation_m: 0.5  # backward-waypoint penalty: linear from 0, saturating at this distance
+# Opt-in for any reward mode; required by minimum_jerk.
+grpo_deterministic_final_step: false
+# Reward-ranked speed siblings: weight of L_SIB; 0 disables
+# them. minimum_jerk only; the family settings are frozen in the stage-3 protocol.
+sibling_weight: 0.0
+training_siblings:
+  decelerations_mps2: [-1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0]  # onset 0 s; 0 is the base
+  late_decelerations_mps2: [2.0, 3.0, 4.0, 6.0]
+  late_onset_s: 0.5
+  ramp_s: 0.5
+  extension_m: 40.0
+  margin: 0.1
+velacc_dropout_probability: 0.0
+joint_motion_dropout_probability: 0.0
+# Resolve the training seed; standalone agent configs default to zero.
+velacc_dropout_seed: ${oc.select:seed,0}
+lr: 1e-4
+lr_scheduler_epochs: 10
+conditioning_mode: hidden_states
+vlm_kv_layers: [3, 6, 10, 13, 17, 20, 24, 27]
+mask_vlm_padding: false
+cross_attention_heads: 8
+cross_attention_kv_heads: 2
+cross_attention_head_dim: 128
+cross_attention_q_norm: false
+vlm_rope_theta: 1000000.0
+inference_precision: 32-true
+# Hazard SFT only: stage-2 objective returned per sample for cohort logs.
+per_sample_loss: false
