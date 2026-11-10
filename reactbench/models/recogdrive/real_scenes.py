@@ -9,8 +9,8 @@ target, which takes the role of the inserted object) and CS (ego speed at the fi
 target). These scenes have no unedited counterpart, so the paper reports levels, averaged over the headways.
 
     python -m reactbench.models.recogdrive.real_scenes build --cohort outputs/real_scenes/cohort.json
-    python -m reactbench.models.recogdrive.real_scenes infer --name il --config il      # GPU; then scores
-    python -m reactbench.models.recogdrive.real_scenes infer --name il_rt --config il_rt
+    python -m reactbench.models.recogdrive.real_scenes infer --name recogdrive_il --config il   # GPU; then scores
+    python -m reactbench.models.recogdrive.real_scenes infer --name recogdrive_il_rt --config il_rt
     python -m reactbench.models.recogdrive.real_scenes summarize
 
 ``build`` reads the navtest metric cache (``navsim_metric_cache``, NAVSIM v2) and writes the scene file.
@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 import copy
 import csv
-import hashlib
 import json
 import math
 import os
@@ -31,6 +30,7 @@ from pathlib import Path
 import numpy as np
 
 from ... import paths
+from ...io import file_digest
 from ..seeds import paired_seed
 
 ROOT = paths.outputs("real_scenes")
@@ -153,21 +153,12 @@ def robust_hit(view, s0, token, speed_mps):
 
 INTERVAL_S = .5
 
-EMERGENCY_DECEL_MPS2 = 3.
-
-def file_sha256(path):
-    result = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for block in iter(lambda: handle.read(1 << 20), b""):
-            result.update(block)
-    return result.hexdigest()
-
 def load_scenes(paths):
-    """Scenes of every file (unique tokens) and the shared input conditions: real, then each headway."""
+    """Scenes of every file (unique tokens) and their shared headways (the input conditions)."""
     scenes, sources, headways = [], [], None
     for path in paths:
         value = json.loads(Path(path).read_text())
-        sources.append({"path": str(Path(path).resolve()), "sha256": file_sha256(path)})
+        sources.append({"path": str(Path(path).resolve()), "sha256": file_digest(path)})
         for scene in value["scenes"]:
             keys = sorted(scene["headways"], key=float)
             if headways is None:
@@ -178,7 +169,7 @@ def load_scenes(paths):
     tokens = [scene["token"] for scene in scenes]
     if not scenes or len(tokens) != len(set(tokens)):
         raise ValueError("Scene files must hold unique tokens")
-    return scenes, sources, ["real", *headways]
+    return scenes, sources, headways
 
 def scenes_by_split(scenes):
     split = {}
@@ -196,14 +187,6 @@ def injected_annotation(annotation, headway):
         record[key] = value.tolist()
     return record
 
-def condition_annotation(annotation, scene, condition):
-    if condition == "real":
-        return annotation
-    return injected_annotation(annotation, scene["headways"][condition])
-
-def initial_speed(annotation):
-    return float(np.linalg.norm(np.asarray(annotation["velocity"][-1], dtype=float)[:2]))
-
 def planner_state(model_shapes, checkpoint_state, prefix="action_head."):
     """Checkpoint tensors for every planner weight; a missing or reshaped weight is an error.
 
@@ -218,21 +201,6 @@ def planner_state(model_shapes, checkpoint_state, prefix="action_head."):
         raise ValueError(f"Checkpoint lacks planner weights: {len(missing)} missing (e.g. {missing[:3]}), "
                          f"{len(reshaped)} reshaped (e.g. {reshaped[:3]})")
     return {k: stripped[k] for k in expected}
-
-def motion(poses, start_speed_mps):
-    """Mean speed per 0.5 s interval and the decelerations between them (from the given start speed)."""
-    poses = np.asarray(poses, dtype=float)
-    if poses.shape != (8, 3) or not np.isfinite(poses).all():
-        raise ValueError("Expected eight finite native poses")
-    points = np.vstack(([0., 0.], poses[:, :2]))
-    speeds = np.linalg.norm(np.diff(points, axis=0), axis=1) / INTERVAL_S
-    steps = np.concatenate(([INTERVAL_S / 2], np.full(len(speeds) - 1, INTERVAL_S)))  # interval centres
-    decel = -np.diff(np.concatenate(([start_speed_mps], speeds))) / steps
-    peak = float(max(decel.max(), 0.))
-    return {"start_speed_mps": float(start_speed_mps), "speed_1s_mps": float(speeds[1]),
-            "speed_2s_mps": float(speeds[3]), "speed_4s_mps": float(speeds[-1]),
-            "peak_deceleration_mps2": peak, "emergency_braking": peak >= EMERGENCY_DECEL_MPS2,
-            "displacement_4s_m": float(np.linalg.norm(points[-1]))}
 
 def target_contacts(score, track_token):
     at_fault = [c for c in score.get("contacts", []) if c.get("actor_id") == track_token]
@@ -258,16 +226,13 @@ def split_config(config, split):
 
 HEADWAYS = ("0.5", "1.0", "1.5", "2.0")
 
-SPEED_BINS_KMH = ((5, 10), (10, 15), (15, 20), (20, 25), (25, 35), (35, 50), (50, 100))
-
 def headway_key(value):
     """Canonical headway key ("1" -> "1.0")."""
     return str(float(value))
 
 def conditions_of(rows):
-    """"real" then the headways, in increasing order."""
-    headways = sorted({r["condition"] for r in rows} - {"real"}, key=float)
-    return (["real"] if any(r["condition"] == "real" for r in rows) else []) + headways
+    """The headways of the records, in increasing order (runs made before the release also hold "real")."""
+    return sorted({r["condition"] for r in rows} - {"real"}, key=float)
 
 def front_gap(line, footprint, s0, front):
     """Route-centerline arc length from the front bumper (at s0 + front) to the footprint's nearest point."""
@@ -326,8 +291,8 @@ def track_motion(world, track):
     poses = [np.asarray(p[:2], dtype=float) for t in world["tracks"] if t["actor_id"] == track for p in t["poses"]]
     return max((float(np.linalg.norm(p - poses[0])) for p in poses), default=None)
 
-def contact_fields(result, track, poses, prefix, interval_length_s=INTERVAL_S):
-    """P, NC_ins and CS of one V2 result, with the target as the inserted object."""
+def contact_fields(result, track, poses, prefix="frozen_", interval_length_s=INTERVAL_S):
+    """P, NC_ins and CS of one V2 result, with the (frozen) target as the inserted object."""
     from ...scoring.collisions import first_contact_speed
     on_target = [c for c in result.get("contacts", []) if c.get("actor_id") == track]  # at-fault contacts only
     contacts = target_contacts(result, track)
@@ -347,28 +312,16 @@ def mean_speed(rows, key):
     return (float(np.mean(values)) if values else None), len(values)
 
 def summarize_records(records):
-    """Per model and condition: P, NC_ins and CS, recorded and frozen, plus braking."""
+    """Per model and headway: P, NC_ins and CS with the target frozen."""
     out = {}
     for model in sorted({r["model"] for r in records}):
         rows_m = [r for r in records if r["model"] == model]
         for condition in conditions_of(rows_m):
             rows = [r for r in rows_m if r["condition"] == condition]
-            ratios = [r["speed_2s_mps"] / r["start_speed_mps"] for r in rows if r["start_speed_mps"] > .5]
-            entry = {"n": len(rows), "emergency_braking": rate(rows, "emergency_braking", True),
-                     "speed_2s_ratio_median": float(np.median(ratios)) if ratios else None}
-            for prefix, tag in (("", ""), ("frozen_", "_frozen")):
-                cs, n_cs = mean_speed(rows, f"{prefix}cs_kmh")
-                entry.update({f"p{tag}": rate(rows, f"{prefix}p"), f"nc_ins{tag}": rate(rows, f"{prefix}nc_ins"),
-                              f"cs_kmh{tag}": cs, f"cs_n{tag}": n_cs})
-            out.setdefault(model, {})[condition] = entry
-    return out
-
-def speed_bins(records, model, condition):
-    rows = [r for r in records if r["model"] == model and r["condition"] == condition]
-    out = {}
-    for lo, hi in SPEED_BINS_KMH:
-        sel = [r for r in rows if lo <= 3.6 * r["injected_speed_mps"] < hi]
-        out[f"{lo}-{hi}"] = {"n": len(sel), "p_frozen": rate(sel, "frozen_p"), "nc_ins_frozen": rate(sel, "frozen_nc_ins")}
+            cs, n_cs = mean_speed(rows, "frozen_cs_kmh")
+            out.setdefault(model, {})[condition] = {
+                "n": len(rows), "p_frozen": rate(rows, "frozen_p"), "nc_ins_frozen": rate(rows, "frozen_nc_ins"),
+                "cs_kmh_frozen": cs, "cs_n_frozen": n_cs}
     return out
 
 
@@ -414,7 +367,7 @@ def build(args):
     from ...scoring.navsim import load_config
     lanes = extract_lanes(scenes, Path(args.work_root or load_config()["work_root"]))
     value = {"version": 2, "probe": PROTOCOL, "split": "navtest", "groups": ["stopped_vehicle"],
-             "cohort": {"path": str(Path(args.cohort).resolve()), "sha256": file_sha256(args.cohort),
+             "cohort": {"path": str(Path(args.cohort).resolve()), "sha256": file_digest(args.cohort),
                         "criteria": cohort["criteria"], "funnel": cohort["funnel"]},
              "criteria": {"headways_s": [float(h) for h in headways],
                           "injection": "v = gap / h, gap = route-centerline arc length from the front bumper to the "
@@ -449,11 +402,11 @@ def build_annotations(scenes):
 
 
 def infer(args):
-    """Run every checkpoint on the real and injected inputs of every scene; then score the run."""
+    """Run every checkpoint on the injected inputs of every scene (one per headway); then score the run."""
     import torch
     from hydra.utils import instantiate
     from . import eval as evaluation
-    from ..common import trajectory_poses
+    from ..runner import trajectory_poses
     output = run_dir(args.scenes, args.name)
     if (output / "predictions.json").exists():
         raise FileExistsError(f"{output} already holds predictions; choose a new --name")
@@ -469,23 +422,21 @@ def infer(args):
     for name, path in checkpoints.items():
         state = planner_state(shapes, torch.load(path, map_location="cpu", weights_only=False)["state_dict"])
         agent.action_head.load_state_dict({k[len("action_head."):]: v for k, v in state.items()}, strict=True)
-        provenance[name] = {"path": str(path), "sha256": file_sha256(path), "planner_weights": len(state)}
+        provenance[name] = {"path": str(path), "sha256": file_digest(path), "planner_weights": len(state)}
         print(f"{name}: loaded all {len(state)} planner weights from {path}", flush=True)
         for scene in scenes:
             token = scene["token"]
             seed = paired_seed(evaluation.SEED_NAMESPACE, seed_base, token)
             for condition in conditions:
-                record = condition_annotation(annotations[token], scene, condition)
+                record = injected_annotation(annotations[token], scene["headways"][condition])
                 trajectory = evaluation.compute_trajectory_with_seed(
                     agent, evaluation.make_input(record, Path(record["front_camera"][-1])), seed)
                 poses = np.asarray(trajectory_poses(trajectory), dtype=float)
                 predictions.setdefault(name, {}).setdefault(token, {})[condition] = poses.tolist()
     value = {"protocol": INFERENCE_PROTOCOL, "scenes": sources,
-             "config": {"path": str(config_path), "sha256": file_sha256(config_path)},
+             "config": {"path": str(config_path), "sha256": file_digest(config_path)},
              "diffusion_seed_base": seed_base, "conditions": conditions, "checkpoints": provenance,
-             "reference": next(iter(checkpoints)),
-             "real_start_speed_mps": {t: initial_speed(a) for t, a in annotations.items()},
-             "predictions": predictions}
+             "reference": next(iter(checkpoints)), "predictions": predictions}
     output.mkdir(parents=True, exist_ok=True)
     (output / "predictions.json").write_text(json.dumps(value) + "\n")
     # Predictions differ slightly across GPU models (e.g. A100 vs H100), so record the device.
@@ -521,31 +472,29 @@ def score(args):
     out = Path(args.run_dir).expanduser().resolve()
     value = json.loads((out / "predictions.json").read_text())
     for item in value["scenes"]:
-        if file_sha256(item["path"]) != item["sha256"]:
+        if file_digest(item["path"]) != item["sha256"]:
             raise ValueError(f"A scenes file changed after inference: {item['path']}")
     scenes, _, _ = load_scenes([item["path"] for item in value["scenes"]])
     worlds = {split: RawWorlds(split_config(config, split)) for split in scenes_by_split(scenes)}
     records = []
     for scene in scenes:
         token, track = scene["token"], scene["target"]["track_token"]
+        # Runs made before the release also predicted the recorded ("real") ego status; it is not scored.
         poses_by = {(model, condition): np.asarray(poses, dtype=float)
-                    for model, tokens in value["predictions"].items() for condition, poses in tokens[token].items()}
+                    for model, tokens in value["predictions"].items() for condition, poses in tokens[token].items()
+                    if condition in scene["headways"]}
         reach = max(float(np.linalg.norm(p[:, :2], axis=1).max()) for p in poses_by.values())
         world = worlds[scene["split"]].load(token, max(100., 100. * math.ceil((reach + 10.) / 100.)))
         frozen = freeze_target(world, track)
-        contexts = (MapContext(token, world, config["work_root"]), MapContext(token, frozen, config["work_root"]))
+        context = MapContext(token, frozen, config["work_root"])
         moved = track_motion(world, track)
         for (model, condition), poses in poses_by.items():
-            headway = None if condition == "real" else scene["headways"][condition]
-            start = value["real_start_speed_mps"][token] if headway is None else headway["speed_mps"]
+            headway = scene["headways"][condition]
             record = {"model": model, "token": token, "split": scene["split"], "condition": condition,
-                      "injected_speed_mps": None if headway is None else headway["speed_mps"],
-                      "gap_m": scene["target"]["gap_m"], "target_motion_4s_m": moved,
-                      "non_reacting_hit_s": None if headway is None else headway["non_reacting_hit_s"],
-                      **motion(poses, start)}
-            for prefix, w, context in (("", world, contexts[0]), ("frozen_", frozen, contexts[1])):
-                record.update(contact_fields(score_prediction_at_fault(poses, INTERVAL_S, None, w, context),
-                                             track, poses, prefix))
+                      "injected_speed_mps": headway["speed_mps"], "gap_m": scene["target"]["gap_m"],
+                      "target_motion_4s_m": moved, "non_reacting_hit_s": headway["non_reacting_hit_s"]}
+            record.update(contact_fields(score_prediction_at_fault(poses, INTERVAL_S, None, frozen, context),
+                                         track, poses))
             records.append(record)
     (out / "scores.json").write_text(json.dumps({"protocol": PROTOCOL, "records": records}) + "\n")
     summary = summarize_records(records)
@@ -567,15 +516,12 @@ def summarize(args):
     out_dir = ROOT / "summary" / stem
     out_dir.mkdir(parents=True, exist_ok=True)
     summaries = {name: summarize_records(records[name])[name] for name in names}
-    conditions = conditions_of(records[names[0]])
-    headways = [c for c in conditions if c != "real"]
-    bins = {name: {h: speed_bins(records[name], name, h) for h in headways} for name in names}
+    headways = conditions_of(records[names[0]])
     mean_over_headways = {name: {key: float(np.mean([summaries[name][h][key] for h in headways]))
                                  for key in ("p_frozen", "nc_ins_frozen", "cs_kmh_frozen")}
                           for name in names}
     (out_dir / "summary.json").write_text(json.dumps({"scenes": stem, "runs": names, "summary": summaries,
-                                                      "mean_over_headways": mean_over_headways,
-                                                      "speed_bins": bins}, indent=1) + "\n")
+                                                      "mean_over_headways": mean_over_headways}, indent=1) + "\n")
     fmt = lambda v, d=1: "-" if v is None else f"{v:.{d}f}"  # noqa: E731
     n = summaries[names[0]][headways[0]]["n"]
     lines = [f"Real scenes, {stem} (n = {n}). Target frozen at t = 0. P and NC_ins in %, CS = mean ego speed at "

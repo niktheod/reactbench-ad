@@ -6,7 +6,8 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/../env.sh"
 ROOT="$(location reacttrain datasets/reacttrain)"
 DATA="$REPO/data/reacttrain"
-COMMON=(--filter "$DATA/reacttrain.yaml" --split trainval --max-samples 2000 --output-root "$(dirname "$ROOT")")
+COMMON=(--filter "$DATA/reacttrain.yaml" --split trainval --max-samples 2000 --output-root "$(dirname "$ROOT")"
+        --min-front-visible-fraction 0.25)  # at least 25% of the object's projected box inside the front camera
 for t in 1 2 3 4; do
     "$REPO/scripts/composite_navsim.sh" "${COMMON[@]}" --directions "$DATA/directions.json" "hazardous_walking_timestep_${t}_n2000" "$t"
     "$REPO/scripts/composite_navsim.sh" "${COMMON[@]}" --standing "hazardous_standing_timestep_${t}_n2000" "$t"

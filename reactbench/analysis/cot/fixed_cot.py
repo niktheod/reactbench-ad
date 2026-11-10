@@ -1,20 +1,23 @@
-"""Fixed reasoning contracts and trajectory comparisons (CPU only).
+"""Fixed CoTs (paper appendix): five hand-written CoTs forced on the edited images, for both Alpamayo models.
 
-Collision metrics come from protocol V2 scoring (``metrics/<dataset>_at_fault_*``), not from here.
+Each condition of ``fixed_cots.yaml`` (accelerate, resume speed, slow down, yield, immediate stop; worded per
+object) is forced on every edited sample with the token's natural seeds, one directory per condition in
+``<run>_fixed_cots/``; the natural original and edited runs (``natural.py``) are the references. Speeds and stops
+are computed here; collision metrics come from protocol V2 scoring (``metrics/paiav_at_fault_*``).
 """
-
 from __future__ import annotations
 
-import hashlib
-import json
 import math
 from pathlib import Path
 
 import numpy as np
 import yaml
 
-from ...models.original_cache import file_sha256, load_cached_trajectory
+from ...io import digest, file_digest, jsonable
+from ...models import runner
+from ...models.original_cache import save_manifest
 from ...scoring.geometry import average_displacement_error, trajectory_distance_driven
+from .natural import NaturalMismatch, natural_runs
 
 CONDITIONS = ("accelerate", "resume_speed", "slow_down", "yield", "immediate_stop")
 REASONS = {
@@ -25,44 +28,12 @@ REASONS = {
 BASELINE = "natural_edited"
 ORIGINAL = "natural_original"
 SCHEMA_VERSION = 1
-
-
-class ResumeConflict(ValueError):
-    """An existing result must not be overwritten with different inputs."""
-
-
-def jsonable(value):
-    if isinstance(value, dict):
-        return {str(k): jsonable(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [jsonable(v) for v in value]
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    if isinstance(value, np.generic):
-        return value.item()
-    return value
-
-
-def digest(value):
-    return hashlib.sha256(json.dumps(jsonable(value), sort_keys=True,
-                                     allow_nan=False).encode()).hexdigest()
-
-
-def read_json(path):
-    return json.loads(Path(path).read_text())
-
-
-def save_json(path, value):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp")
-    try:
-        temporary.write_text(json.dumps(jsonable(value), indent=2, allow_nan=False) + "\n")
-        temporary.replace(path)
-    finally:
-        temporary.unlink(missing_ok=True)
+METRIC_DEFINITIONS = {
+    "speed": "Planar segment distance / dt, origin included; times are segment midpoints",
+    "stop": "First low-speed segment start with at least stop_duration_s consecutive low-speed segments",
+    "stop_time_null": "No sustained stop within the four-second horizon",
+    "initially_stationary": "Recorded initial speed <= stop_speed_mps; moving_stopping_rate excludes these samples",
+}
 
 
 def load_config(path):
@@ -93,14 +64,13 @@ def load_config(path):
 
 
 def object_type(metadata):
-    """Resolve existing run/normalized actor metadata, never directory names."""
+    """The inserted object of a run configuration or actor motion (never a directory name)."""
     actor = metadata.get("actor_type", "pedestrian")
     if actor == "car":
         return "car"
     if actor != "pedestrian":
         raise ValueError(f"Unsupported inserted actor: {actor!r}")
-    behavior = metadata.get("behavior", metadata.get("actor_behavior",
-                                                   metadata.get("pedestrian_behavior")))
+    behavior = metadata.get("behavior", metadata.get("actor_behavior", metadata.get("pedestrian_behavior")))
     velocity = metadata.get("velocity_xy_mps")
     speed = np.linalg.norm(velocity) if velocity is not None else metadata.get("speed_mps")
     if speed is None or not np.isfinite(float(speed)) or float(speed) < 0:
@@ -116,48 +86,18 @@ def object_type(metadata):
 
 
 def resolve_conditions(config, kind):
-    return {name: config["conditions"][name].format(reason=REASONS[kind])
-            for name in CONDITIONS}
+    return {name: config["conditions"][name].format(reason=REASONS[kind]) for name in CONDITIONS}
 
 
-def add_arguments(parser):
-    parser.add_argument("--fixed-cots", type=Path, metavar="PATH", nargs="?",
-                        const=Path(__file__).resolve().with_name("fixed_cots.yaml"),
-                        help="Evaluate five fixed CoTs; defaults to the bundled fixed_cots.yaml.")
-
-
-def prepare_manifest(root, identity, tokens):
-    path = root / "evaluation_manifest.json"
-    if path.exists():
-        previous = read_json(path)
-        if previous.get("identity") != jsonable(identity):
-            raise ValueError(f"Conflicting fixed-CoT output settings: {path}")
-    elif root.exists() and any(root.iterdir()):
-        raise ValueError(f"Refusing to reuse output without a manifest: {root}")
-    save_json(path, {"mode": "fixed_cots", "schema_version": SCHEMA_VERSION,
-                     "identity": identity, "selected_tokens": tokens})
-
-
-def input_provenance(agent_input, metadata_path):
-    """Fingerprint the supplied dynamics, metadata and actual camera files."""
-    files = {}
-
-    def visit(value):
-        if isinstance(value, dict):
-            for item in value.values():
-                visit(item)
-        elif isinstance(value, (list, tuple)):
-            for item in value:
-                visit(item)
-        elif isinstance(value, (str, Path)):
-            p = Path(value)
-            if p.suffix.lower() in (".png", ".jpg", ".jpeg") and p.is_file():
-                files[str(p.resolve())] = file_sha256(p)
-
-    visit(agent_input)
-    return {"input_sha256": digest(agent_input), "image_sha256": files,
-            "metadata_path": str(metadata_path),
-            "metadata_sha256": file_sha256(metadata_path)}
+def input_provenance(loader, token, model_input, contract, metadata_path):
+    """Fingerprint of the edited inputs: the model input, the edited image files and the archive sources."""
+    from ...models.original_cache import source_contract_identity
+    images = {str(camera): [file_digest(Path(path)) for path in paths]
+              for camera, paths in loader.edited_camera_paths(token).items()}
+    inputs = {key: value for key, value in model_input.items() if key != "camera_paths"}
+    return {"model_input_sha256": digest(jsonable(inputs)), "edited_image_sha256": images,
+            "source_contract_sha256": digest(source_contract_identity(contract)),
+            "metadata_path": str(metadata_path), "metadata_sha256": file_digest(Path(metadata_path))}
 
 
 def speed_metrics(poses, dt, initial_speed, config):
@@ -167,8 +107,7 @@ def speed_metrics(poses, dt, initial_speed, config):
     threshold = config["stop_speed_mps"]
     window = max(1, int(math.ceil(config["stop_duration_s"] / dt - 1e-9)))
     low = speeds <= threshold
-    start = next((i for i in range(len(low) - window + 1)
-                  if low[i:i + window].all()), None)
+    start = next((i for i in range(len(low) - window + 1) if low[i:i + window].all()), None)
     return {
         "speed_mps": speeds.tolist(),
         "speed_time_s": ((np.arange(len(speeds)) + 0.5) * dt).tolist(),
@@ -181,38 +120,29 @@ def speed_metrics(poses, dt, initial_speed, config):
 
 
 def condition_metrics(poses, *, dt, initial_speed, config):
-    return {
-        "distance_driven_m": trajectory_distance_driven(poses),
-        **speed_metrics(poses, dt, initial_speed, config),
-    }
+    return {"distance_driven_m": trajectory_distance_driven(poses), **speed_metrics(poses, dt, initial_speed, config)}
 
 
 def contrast(before_poses, after_poses, before, after):
-    return {
-        "ade_m": average_displacement_error(before_poses, after_poses),
-        **{f"{key}_delta": after[key] - before[key] for key in (
-            "distance_driven_m", "final_speed_mps")},
-    }
+    return {"ade_m": average_displacement_error(before_poses, after_poses),
+            **{f"{key}_delta": after[key] - before[key] for key in ("distance_driven_m", "final_speed_mps")}}
 
 
 def aggregate(records, tokens):
     complete = [r for r in records if all(c in r["conditions"] for c in CONDITIONS)]
     paired = [r for r in complete if BASELINE in r["conditions"]]
-    # All main bars/curves use precisely this cohort; fixed-only remains available
-    # when natural caches are missing, with its own explicit denominator.
+
+    # All main bars/curves use precisely this cohort; fixed-only stays available when natural runs are missing.
     def summarize(cohort, names):
         result = {}
         for name in names:
             values = [r["conditions"][name] for r in cohort]
             moving = [v for v in values if not v["initially_stationary"]]
-            mean = lambda key, rows=values: (float(np.mean([v[key] for v in rows]))
-                                           if rows else None)
+            mean = lambda key, rows=values: (float(np.mean([v[key] for v in rows])) if rows else None)  # noqa: E731
             result[name] = {
                 "count": len(values), "stopping_rate": mean("sustained_stop"),
-                "moving_stopping_rate": mean("sustained_stop", moving),
-                "moving_count": len(moving),
-                "distance_driven_m": mean("distance_driven_m"),
-                "final_speed_mps": mean("final_speed_mps"),
+                "moving_stopping_rate": mean("sustained_stop", moving), "moving_count": len(moving),
+                "distance_driven_m": mean("distance_driven_m"), "final_speed_mps": mean("final_speed_mps"),
             }
         return result
     contrasts = {}
@@ -223,54 +153,136 @@ def aggregate(records, tokens):
                 continue
             key = f"{before}->{after}"
             values = [r["contrasts"][key] for r in cohort if key in r["contrasts"]]
-            contrasts[key] = {
-                "count": len(values),
-                **{field: float(np.mean([v[field] for v in values])) if values else None
-                   for field in ("ade_m", "distance_driven_m_delta", "final_speed_mps_delta")},
-            }
+            contrasts[key] = {"count": len(values), **{
+                field: float(np.mean([v[field] for v in values])) if values else None
+                for field in ("ade_m", "distance_driven_m_delta", "final_speed_mps_delta")}}
     return {
-        "requested_count": len(tokens), "fixed_complete_count": len(complete),
-        "comparison_count": len(paired),
+        "requested_count": len(tokens), "fixed_complete_count": len(complete), "comparison_count": len(paired),
         "comparison_tokens": [r["token"] for r in paired],
         "condition_counts": {name: {
-            "attempted": len(tokens),
-            "successful": sum(name in r["conditions"] for r in records),
-            "failed": len(tokens) - sum(name in r["conditions"] for r in records),
-        } for name in CONDITIONS},
+            "attempted": len(tokens), "successful": sum(name in r["conditions"] for r in records),
+            "failed": len(tokens) - sum(name in r["conditions"] for r in records)} for name in CONDITIONS},
         "conditions": summarize(paired, (*CONDITIONS, BASELINE)),
         "fixed_only_conditions": summarize(complete, CONDITIONS),
         "contrasts": contrasts,
     }
 
 
-def load_completed(root, token, expected, dt):
-    """Reasoning JSON is the commit marker, written after the trajectory."""
-    reasoning_path = root / "reasoning" / f"{token}.json"
-    trajectory_path = root / "trajectories" / f"{token}.npz"
-    if not reasoning_path.exists():
-        return None
-    document = read_json(reasoning_path)
-    if document.get("intervention") != jsonable(expected):
-        raise ResumeConflict(f"Conflicting saved intervention: {reasoning_path}")
-    if not trajectory_path.exists():
-        raise ResumeConflict(f"Completed intervention has no trajectory: {trajectory_path}")
-    if document.get("trajectory_sha256") != file_sha256(trajectory_path):
-        raise ResumeConflict(f"Saved trajectory checksum mismatch: {trajectory_path}")
-    return load_cached_trajectory(trajectory_path, expected_interval_length_s=dt)
-
-
-def save_completed(root, token, poses, output, intervention, dt):
-    directory = root / "trajectories"
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{token}.npz"
-    temporary = path.with_name(f".{path.name}.tmp")
-    try:
-        with temporary.open("wb") as stream:
-            np.savez_compressed(stream, trajectory=poses, interval_length_s=np.float32(dt))
-        temporary.replace(path)
-    finally:
-        temporary.unlink(missing_ok=True)
-    save_json(root / "reasoning" / f"{token}.json", {
-        "intervention": intervention, "model_output": output,
-        "trajectory_sha256": file_sha256(path),
-    })
+def run(s) -> int:
+    """The fixed CoTs of ``s.tokens`` (``natural.main`` prepares ``s``); 0 if any condition succeeded."""
+    model, loader, root, dt = s.model, s.model.loader, s.result_dir, s.model.interval_length_s
+    fixed_path = s.args.fixed_cots.expanduser().resolve()
+    fixed = load_config(fixed_path)
+    if fixed["stop_duration_s"] > runner.METRIC_HORIZON_S:
+        raise ValueError("stop_duration_s exceeds the metric horizon")
+    kind = object_type(loader.run_config)
+    texts = resolve_conditions(fixed, kind)
+    for text in texts.values():
+        model.forced_prefix(text)
+    # A missing natural run is reported (the fixed-only cohort remains); an incompatible one is fatal.
+    natural, baselines = natural_runs(s, required=False)
+    natural = {ORIGINAL: natural["original"], BASELINE: natural["edited"]}
+    baselines = {ORIGINAL: baselines["original"], BASELINE: baselines["edited"]}
+    # Hashed into every intervention: the model's settings, the fixed CoTs and the inputs they apply to.
+    identity = {
+        "schema_version": SCHEMA_VERSION, "signature": s.signature, "run_dir": str(model.run_dir),
+        "run_config_sha256": file_digest(loader.run_config_path), "fixed_config": fixed,
+        "fixed_config_sha256": file_digest(fixed_path), "conditions": texts, "object_type": kind,
+        "insertion_timestep": loader.run_config.get("future_timestep"),
+        "metric_horizon_s": runner.METRIC_HORIZON_S,
+        "baseline_dirs": {BASELINE: str(s.edited_dir), ORIGINAL: str(s.original_dir)}, **model.cot_identity()}
+    runner.prepare_output(root, s.args.overwrite, remove=True)
+    print(f"Fixed CoTs: {len(s.tokens)} samples x {len(texts)} conditions; {root}", flush=True)
+    print(f"Baseline availability: {baselines}", flush=True)
+    model.load()
+    records, failures, successful = [], [], []
+    for index, token in enumerate(s.tokens, 1):
+        seeds = model.seeds(token)
+        record = {"token": token, "output_stem": token, "conditions": {}, "contrasts": {}, **seeds}
+        stage = "source_contract"
+        try:
+            contract = loader.original_source_contract(token)
+            stage = "edited_input_check"
+            record.update(model.check_edited_inputs(token))
+            stage = "metric_context"
+            context = model.metric_context(token)
+            actor, speed = context["actor_motion"], context["speed_mps"]
+            if object_type(actor) != kind:
+                raise ValueError(f"Actor metadata differs from run object type for {token}")
+            record.update(actor_motion=actor, ego_geometry=context.get("vehicle_geometry"), speed_mps=speed,
+                          longitudinal_acceleration_mps2=context.get("longitudinal_acceleration_mps2"),
+                          placement_metadata_path=context["placement_metadata_path"], ego_origin="rear_axle")
+            stage = "natural_baselines"
+            trajectories, issues, references = {}, {}, {}
+            for name, run_ in natural.items():
+                reason = "No compatible natural run" if run_ is None else run_.unavailable(token)
+                if reason:
+                    issues[name] = reason
+                    continue
+                try:
+                    output = run_.load(token, contract, seeds)
+                except NaturalMismatch:
+                    raise
+                except (FileNotFoundError, KeyError, ValueError) as exc:
+                    issues[name] = f"{type(exc).__name__}: {exc}"
+                    continue
+                trajectories[name] = output.poses
+                references[name] = {"path": str(output.trajectory_path), "sha256": output.trajectory_sha256}
+            record.update(baseline_issues=issues, baseline_provenance=references)
+            stage = "edited_inputs"
+            with model.inputs(token, False) as model_input:
+                provenance = input_provenance(loader, token, model_input, contract, context["placement_metadata_path"])
+                record["provenance"] = provenance
+                for name, text in texts.items():
+                    intervention = {"condition": name, "forced_cot": text, "assistant_prefix": model.forced_prefix(text),
+                                    "text_sha256": digest(text), **seeds, "input_provenance": provenance,
+                                    "identity_sha256": digest(jsonable(identity))}
+                    try:
+                        prediction = model.force(model_input, text, seeds)
+                        poses = runner.trajectory_poses(prediction)
+                        path = root / name / "trajectories" / f"{token}.npz"
+                        runner.save_trajectory(path, poses, dt, **model.arrays(prediction))
+                        runner.save_json(root / name / "reasoning" / f"{token}.json", {
+                            "intervention": intervention, "model_output": prediction.extra,
+                            "trajectory_sha256": file_digest(path)})
+                        trajectories[name] = poses
+                    except Exception as exc:
+                        failures.append(runner.failure(index, token, f"{name}_inference", exc, **seeds))
+                        print(f"{token} {name}: {exc}", flush=True)
+            stage = "metrics"
+            metrics = {}
+            for name, poses in trajectories.items():
+                try:
+                    poses = runner.metric_poses(poses, dt)
+                    record["conditions"][name] = condition_metrics(poses, dt=dt, initial_speed=speed, config=fixed)
+                    metrics[name] = poses
+                except Exception as exc:
+                    failures.append(runner.failure(index, token, f"{name}_metrics", exc, **seeds))
+            for before in metrics:
+                for after in CONDITIONS:
+                    if after in metrics and before != after:
+                        record["contrasts"][f"{before}->{after}"] = contrast(
+                            metrics[before], metrics[after], record["conditions"][before], record["conditions"][after])
+            # Small arrays permit standalone CPU sample plots with no source caches.
+            record["trajectories"] = jsonable(metrics)
+        except NaturalMismatch:
+            raise
+        except Exception as exc:
+            failures.append(runner.failure(index, token, stage, exc, **seeds))
+        if record["conditions"].keys() & set(CONDITIONS):
+            successful.append(token)
+        records.append(record)
+        runner.save_json(root / "failed_samples.json", failures)
+        print(f"[{index}/{len(s.tokens)}] {token}: "
+              f"{sum(name in record['conditions'] for name in CONDITIONS)}/{len(CONDITIONS)} conditions", flush=True)
+    runner.save_json(root / "metrics" / "per_sample.json", records)
+    summary = {**aggregate(records, s.tokens), "mode": "fixed_cots", "model": model.model, "dataset": model.dataset,
+               "run_dir": str(model.run_dir), "identity": identity, "baselines": baselines,
+               "failure_count": len(failures), "result_dir": str(root), "interval_length_s": dt,
+               "metric_horizon_s": runner.METRIC_HORIZON_S, "gpus": runner.gpu_names(),
+               "metric_definitions": METRIC_DEFINITIONS, **model.summary_extras()}
+    runner.save_json(root / "metrics" / "summary.json", summary)
+    save_manifest(root, mode="fixed_cots", signature=s.signature, source_run_dir=model.run_dir,
+                  selected_tokens=s.tokens, successful_tokens=successful, identity=identity)
+    print(f"Saved fixed-CoT results: {root}; paired comparison count={summary['comparison_count']}", flush=True)
+    return 0 if successful else 1

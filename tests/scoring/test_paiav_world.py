@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import tempfile
 import io
-import os
 import zipfile
 from pathlib import Path
 import unittest
@@ -12,11 +11,11 @@ import pandas as pd
 from scipy.spatial.transform import Rotation
 
 from reactbench.scoring.collisions import score_trajectory
-from reactbench.scoring.paiav_world import BackgroundWorlds, build_background_world, pose_matrices, verified_archive
+from reactbench.scoring.paiav_world import BackgroundWorlds, build_background_world, pose_matrices
 from reactbench.scoring.paiav_world import (
     ANNOTATION_TRACK_EXCLUSIONS, annotation_track_exclusions, apply_annotation_track_exclusions,
 )
-from reactbench.io import file_digest, read_json, write_json
+from reactbench.io import read_json, write_json
 
 
 def fixtures():
@@ -144,23 +143,6 @@ class CollisionWorldTests(unittest.TestCase):
         self.assertEqual(value["coverage"]["partial_lifetime_track_count"], 1)
         self.assertAlmostEqual(value["tracks"][1]["times_s"][0], 1.1)
 
-    def test_archive_requires_matching_revision_and_bytes(self):
-        with tempfile.TemporaryDirectory(prefix="test-paiav-archive-", dir="/tmp") as scratch:
-            path = Path(scratch) / "test.zip"
-            path.write_bytes(b"archive")
-            receipt = {"repo_id": "repo", "revision": "abc", "sha256": file_digest(path)}
-            write_json(path.with_suffix(".zip.provenance.json"), receipt)
-            self.assertEqual(verified_archive(path, "repo", "abc"), receipt["sha256"])
-            with self.assertRaises(ValueError):
-                verified_archive(path, "repo", "def")
-            stamp = path.stat()
-            path.write_bytes(b"changed")
-            # Some test filesystems coalesce immediate writes into one timestamp.
-            # Published source revisions must have a new file identity/stat stamp.
-            os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns + 1_000_000_000))
-            with self.assertRaises(ValueError):
-                verified_archive(path, "repo", "abc")
-
     def test_world_cache_checks_payload_and_input_members(self):
         with tempfile.TemporaryDirectory(prefix="test-paiav-world-cache-", dir="/tmp") as scratch:
             root = Path(scratch)
@@ -173,7 +155,6 @@ class CollisionWorldTests(unittest.TestCase):
             path = root / "obstacles.zip"
             archive(path, "t.parquet", obstacles)
             archive(root / "ego.zip", "ego.parquet", ego)
-            write_json(path.with_suffix(".zip.provenance.json"), {"repo_id": "repo", "revision": "abc", "sha256": file_digest(path)})
             context = {"repo_id": "repo", "revision": "abc", "obstacle_relative_path": "obstacles.zip",
                        "obstacle_member": "t.parquet", "offline_egomotion_path": str(root / "ego.zip"),
                        "offline_egomotion_member": "ego.parquet", "current_timestamp_us": 1_000_000}
@@ -191,7 +172,6 @@ class CollisionWorldTests(unittest.TestCase):
                 worlds.close()
             obstacles["size_x"] = 5.
             archive(path, "t.parquet", obstacles)
-            write_json(path.with_suffix(".zip.provenance.json"), {"repo_id": "repo", "revision": "abc", "sha256": file_digest(path)})
             worlds = BackgroundWorlds(config)
             try:
                 changed, changed_fingerprint = worlds.load(context)

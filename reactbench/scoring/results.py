@@ -1,8 +1,10 @@
 """Inventory of a saved run: which predictions, insertions and pairs to score (read only).
 
-A run directory holds ``metrics/summary.json``, ``metrics/per_sample.json``, optionally
-``evaluation_manifest.json``, and one ``<token>.npz`` per prediction under ``trajectories/``
-(or ``original/`` and ``edited/`` members, or one directory per CoT condition).
+A predictions run is ``<model>/<reactnav|reactpai>/<run>/trajectories/<token>.npz`` next to
+``<model>/<dataset>/original/trajectories/<token>.npz`` (see README "Output format"). The runners also write
+``metrics/summary.json`` and ``metrics/per_sample.json``, which name the benchmark run and the original
+predictions; without them, the benchmark run is passed in (``run_dir``) and the originals are the sibling
+``original/``. CoT runs keep one directory per condition.
 """
 from __future__ import annotations
 
@@ -114,8 +116,15 @@ def _put_predictions(target, condition, path, dt):
         target[f"{condition}/{branch}" if branch else condition] = source
 
 
-def inventory_result(result_dir):
-    """Read only: resolve every saved/expected sample into a scoring request."""
+DATASET_FOLDERS = {"reactnav": "navsim", "reactpai": "pai-av"}
+
+
+def inventory_result(result_dir, *, run_dir=None, dataset=None):
+    """Read only: resolve every saved/expected sample into a scoring request.
+
+    ``run_dir``: the benchmark run (default: the one the run's bookkeeping names). ``dataset``: "navsim" or
+    "pai-av" (default: from the parent folder, ``reactnav`` or ``reactpai``).
+    """
     root = Path(result_dir).resolve()
     summary = read_json(root / "metrics/summary.json", {})
     manifest = read_json(root / "evaluation_manifest.json", {})
@@ -127,11 +136,14 @@ def inventory_result(result_dir):
     mode = summary.get("mode", manifest.get("mode", "paired"))
     if mode != "fixed_cots" and identity.get("fixed_config"):
         mode = "fixed_cots"
-    dataset_text = " ".join(str(v) for v in (summary.get("dataset", ""), signature.get("evaluator", ""),
-                   signature.get("source", {}).get("dataset", ""), identity.get("backend", "")))
-    dataset = "pai-av" if ("pai" in dataset_text.lower() or "alpamayo" in root.parts) else "navsim"
+    dataset = dataset or DATASET_FOLDERS.get(root.parent.name)
+    if dataset is None:
+        # Runs outside the outputs layout (the research repo's): guess from the bookkeeping.
+        dataset_text = " ".join(str(v) for v in (summary.get("dataset", ""), signature.get("evaluator", ""),
+                       signature.get("source", {}).get("dataset", ""), identity.get("backend", "")))
+        dataset = "pai-av" if ("pai" in dataset_text.lower() or "alpamayo" in root.parts) else "navsim"
     run_value = summary.get("run_dir", identity.get("run_dir", manifest.get("source_run_dir")))
-    run_dir = _path(run_value, root) if run_value else None
+    run_dir = Path(run_dir).resolve() if run_dir else (_path(run_value, root) if run_value else None)
     dt = summary.get("interval_length_s", signature.get("interval_length_s"))
     sources = {str(p): file_digest(p) for p in (root / "metrics/summary.json",
                root / "metrics/per_sample.json", root / "evaluation_manifest.json") if p.is_file()}
@@ -163,17 +175,21 @@ def inventory_result(result_dir):
         return {"result_dir": str(root), "dataset": dataset, "mode": mode,
                 "sources": sources, "tasks": [], "status": "inapplicable",
                 "reason": "No saved or expected trajectory samples found"}
+    if mode == "original":
+        # Original-scene predictions are the inputs of the paired runs; no table scores them alone.
+        return {"result_dir": str(root), "dataset": dataset, "mode": mode, "sources": sources, "tasks": [],
+                "status": "inapplicable", "reason": "Original-scene predictions are scored in their pairs"}
     original_value = summary.get("original_result_dir", summary.get("natural_original_result_dir",
                                     identity.get("baseline_dirs", {}).get("natural_original")))
-    original_root = _path(original_value, root) if original_value else root / "original"
-    original_only = mode == "original"
+    original_root = (_path(original_value, root) if original_value else
+                     root / "original" if (root / "original").is_dir() else root.parent / "original")
     tasks = []
     for token in sorted(expected):
         row = by_token.get(token, {})
-        task = {"token": token, "dataset": dataset, "world": "clean" if original_only else "augmented",
+        task = {"token": token, "dataset": dataset, "world": "augmented",
                 "predictions": {}, "pairs": {}, "primary_condition": None,
-                "groups": {k: row[k] for k in ("speed_bin_kmh", "acceleration_bin_mps2",
-                           "actor_type", "speed_mps", "longitudinal_acceleration_mps2") if k in row}}
+                "groups": {k: row[k] for k in ("speed_bin_kmh", "actor_type", "speed_mps",
+                                               "longitudinal_acceleration_mps2") if k in row}}
         try:
             stem = str(row.get("output_stem", token))
             if Path(stem).name != stem or Path(token).name != token:
@@ -183,35 +199,34 @@ def inventory_result(result_dir):
             if dataset != "navsim":
                 # Completed by the PAI-AV scorer, which loads its own background world.
                 task.update(status="unsupported", reason="PAI-AV needs compatible maps/routes and background tracks")
-            if not original_only:
-                metadata_value = row.get("placement_metadata_path", row.get("metadata_path",
-                                     row.get("provenance", {}).get("metadata_path")))
-                metadata_path = (_path(metadata_value, root) if metadata_value else
-                                 run_dir / "metadata" / f"{token}.json" if run_dir else None)
-                motion = row.get("actor_motion")
-                if metadata_path and metadata_path.is_file() and dataset == "navsim":
-                    from .actor_motion import inserted_actor_motion
-                    metadata = read_json(metadata_path)
-                    parsed = inserted_actor_motion(metadata)
-                    if motion is not None:
-                        # Verify physically relevant geometry/motion, ignoring extra bookkeeping keys.
-                        for time_s in (0.0, 5.0):
-                            a, b = (actor_box_state(m, [0, 0, 0], time_s) for m in (motion, parsed))
-                            for key in ("pose", "length", "width", "velocity"):
-                                if not np.allclose(a[key], b[key], atol=1e-6):
-                                    raise ValueError("Saved actor motion disagrees with compositor metadata")
-                    motion = parsed
-                    task["metadata_source"] = _source_path(metadata_path)
-                if motion is None and dataset == "navsim":
-                    raise ValueError("Missing insertion metadata/actor motion")
-                task["actor_motion"] = motion
-                if motion:
-                    if dataset == "navsim":
-                        actor_box_state(motion, [0, 0, 0], 0)
-                        if motion.get("actor_type", "pedestrian") == "pedestrian" and not motion.get("geometry"):
-                            raise ValueError("Missing measured pedestrian geometry; legacy fixed footprints cannot be scored")
-                    task["groups"]["actor_type"] = motion.get("actor_type", "pedestrian")
-                    task["groups"]["placement_timestep"] = motion.get("future_timestep")
+            metadata_value = row.get("placement_metadata_path", row.get("metadata_path",
+                                 row.get("provenance", {}).get("metadata_path")))
+            metadata_path = (_path(metadata_value, root) if metadata_value else
+                             run_dir / "metadata" / f"{token}.json" if run_dir else None)
+            motion = row.get("actor_motion")
+            if metadata_path and metadata_path.is_file() and dataset == "navsim":
+                from .actor_motion import inserted_actor_motion
+                metadata = read_json(metadata_path)
+                parsed = inserted_actor_motion(metadata)
+                if motion is not None:
+                    # Verify physically relevant geometry/motion, ignoring extra bookkeeping keys.
+                    for time_s in (0.0, 5.0):
+                        a, b = (actor_box_state(m, [0, 0, 0], time_s) for m in (motion, parsed))
+                        for key in ("pose", "length", "width", "velocity"):
+                            if not np.allclose(a[key], b[key], atol=1e-6):
+                                raise ValueError("Saved actor motion disagrees with compositor metadata")
+                motion = parsed
+                task["metadata_source"] = _source_path(metadata_path)
+            if motion is None and dataset == "navsim":
+                raise ValueError("Missing insertion metadata/actor motion")
+            task["actor_motion"] = motion
+            if motion:
+                if dataset == "navsim":
+                    actor_box_state(motion, [0, 0, 0], 0)
+                    if motion.get("actor_type", "pedestrian") == "pedestrian" and not motion.get("geometry"):
+                        raise ValueError("Missing measured pedestrian geometry; legacy fixed footprints cannot be scored")
+                task["groups"]["actor_type"] = motion.get("actor_type", "pedestrian")
+                task["groups"]["placement_timestep"] = motion.get("future_timestep")
             predictions = task["predictions"]
             if mode == "fixed_cots":
                 names = set(identity.get("conditions", {})) | set(row.get("conditions", {}))
@@ -239,8 +254,6 @@ def inventory_result(result_dir):
                 task["primary_condition"] = "edited_image_edited_cot"
                 task["pairs"] = {name: ["original_image_original_cot", name] for name in names
                                  if name != "original_image_original_cot"}
-            elif original_only:
-                _put_predictions(predictions, "original", _archive_for(root, stem), dt)
             else:
                 _put_predictions(predictions, "original", _archive_for(original_root, stem), dt)
                 edited_root = root / "edited" if (root / "edited").is_dir() else root
@@ -259,7 +272,7 @@ def inventory_result(result_dir):
                 if "path" in source and not Path(source["path"]).is_file():
                     source["error"] = "Missing saved trajectory"
             if dataset == "navsim":
-                from .motion_bins import acceleration_bin_label, speed_bin_label
+                from .motion_bins import speed_bin_label
                 groups = task["groups"]
                 speed = groups.get("speed_mps")
                 if speed is None:
@@ -269,9 +282,6 @@ def inventory_result(result_dir):
                 try:
                     if speed is not None and "speed_bin_kmh" not in groups:
                         groups["speed_bin_kmh"] = speed_bin_label(float(speed)*3.6)
-                    acceleration = groups.get("longitudinal_acceleration_mps2")
-                    if acceleration is not None and "acceleration_bin_mps2" not in groups:
-                        groups["acceleration_bin_mps2"] = acceleration_bin_label(acceleration)
                 except ValueError as exc:
                     task["grouping_warning"] = str(exc)
             task.setdefault("status", "ready")

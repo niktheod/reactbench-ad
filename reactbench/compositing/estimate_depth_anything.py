@@ -23,6 +23,7 @@ from transformers import AutoImageProcessor, AutoModelForDepthEstimation
 
 
 MODEL_ID = "depth-anything/Depth-Anything-V2-Small-hf"
+REVISION = "5426e4f0f36572d16453bbda7a8389317b1bef99"  # the paper's renders
 DEFAULT_CACHE_VERSION = "fullres_float32_v1"
 
 
@@ -80,6 +81,7 @@ def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--jobs", type=Path, required=True)
     parser.add_argument("--model", default=MODEL_ID)
+    parser.add_argument("--revision", default=REVISION)
     parser.add_argument("--local-files-only", action="store_true")
     return parser.parse_args()
 
@@ -92,10 +94,10 @@ def main() -> None:
         return
 
     processor = AutoImageProcessor.from_pretrained(
-        args.model, local_files_only=args.local_files_only, use_fast=False
+        args.model, revision=args.revision, local_files_only=args.local_files_only, use_fast=False
     )
     model = AutoModelForDepthEstimation.from_pretrained(
-        args.model, local_files_only=args.local_files_only
+        args.model, revision=args.revision, local_files_only=args.local_files_only
     )
     model.eval()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

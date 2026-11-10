@@ -2,7 +2,7 @@
 
 Alpamayo 1.5 wraps its reasoning in ``<|cot_start|>``/``<|cot_end|>`` and starts the trajectory with
 ``<|traj_future_start|>``. A forced rollout puts ``<|cot_start|>{cot}<|cot_end|><|traj_future_start|>`` into
-the assistant turn (``agent_paiav.py``, ``forced_cot=``); Alpamayo 2's format is in
+the assistant turn (``agent.py``, ``forced_cot=``); Alpamayo 2's format is in
 ``models/alpamayo2/forced_cot.py``.
 """
 from __future__ import annotations

@@ -133,16 +133,20 @@ def lanes_identity(work_root):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--tokens-from", type=Path, required=True,
-                        help="NAVSIM annotation list (JSON list of records with a token)")
+    parser.add_argument("--tokens-from", type=Path, nargs="+", required=True,
+                        help="NAVSIM annotations (a JSON list of records with a token) or the real-scenes file")
     parser.add_argument("--metric-cache", type=Path, default=None,
                         help="Default: navsim_metric_cache in configs/paths.yaml")
-    parser.add_argument("--work-root", type=Path, default=None, help="Default: <outputs>/work/navsim")
+    parser.add_argument("--work-root", type=Path, default=None, help="Default: the scorer's (scoring_work)")
     parser.add_argument("--workers", type=int, default=1)
     args = parser.parse_args()
     args.metric_cache = args.metric_cache or paths.get("navsim_metric_cache")
-    args.work_root = args.work_root or paths.outputs("work", "navsim")
-    tokens = sorted({str(r["token"]) for r in read_json(args.tokens_from)})
+    args.work_root = args.work_root or paths.get("scoring_work", paths.outputs("work", "navsim"))
+    tokens = set()
+    for path in args.tokens_from:
+        records = read_json(path)
+        tokens |= {str(r["token"]) for r in (records["scenes"] if isinstance(records, dict) else records)}
+    tokens = sorted(tokens)
     report = extract(tokens, args.metric_cache, args.work_root, args.workers)
     print(json.dumps({k: (v if not isinstance(v, list) else len(v)) for k, v in report.items()
                       if k != "contract"}, indent=1))

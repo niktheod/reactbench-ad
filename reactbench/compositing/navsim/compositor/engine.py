@@ -316,7 +316,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     benign_placements.add_arguments(parser)
     benign_sides.add_arguments(parser)
-    front_visibility.add_arguments(parser)
+    # ReactNAV has no front-visibility minimum; ReactTrain and the standing animals use 0.25 (their launchers pass it).
+    front_visibility.add_arguments(parser, default=0.0)
     parser.add_argument("--scene-filter", type=Path, required=True)
     parser.add_argument(
         "--direction-classifications",

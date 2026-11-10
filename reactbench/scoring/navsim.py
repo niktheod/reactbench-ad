@@ -27,7 +27,7 @@ from ..io import digest, file_digest, read_json, write_json
 from . import results as saved
 from .collisions import paired_outcome
 from .navsim_metrics import AT_FAULT_SCORING_CONTRACT
-from .reporting import summarize, summarize_original
+from .reporting import summarize
 from .results import load_prediction
 
 PREFIX = "navsim_at_fault"
@@ -95,13 +95,11 @@ def postprocess_evaluation(result_dir, mode="score", workers=1):
         write_json(Path(result_dir) / f"metrics/{PREFIX}_error.json", {"status": "failed", "error": str(exc)})
 
 
-def inventory_result(root):
-    inventory = saved.inventory_result(root)
+def inventory_result(root, *, run_dir=None, dataset=None):
+    inventory = saved.inventory_result(root, run_dir=run_dir, dataset=dataset)
     for task in inventory["tasks"]:
         if task["dataset"] != "navsim":
             task.update(status="inapplicable", reason="ReactNAV scoring requires a NAVSIM scene")
-        if task["world"] == "clean":
-            task["actor_motion"] = None
         task["input_fingerprint"] = digest({k: v for k, v in task.items() if k != "input_fingerprint"})
     return inventory
 
@@ -116,7 +114,7 @@ def implementation_fingerprint(config):
 def score_task(task, worlds, config, contract):
     from collections import defaultdict
     from .ade import paired_ade
-    from .motion_bins import acceleration_bin_label, speed_bin_label
+    from .motion_bins import speed_bin_label
     from .navsim_batch import score_predictions
     from .navsim_metrics import MapContext, at_fault_from_physical, score_prediction_at_fault
     row = {"token": task["token"], "world": task["world"], "status": task["status"], "reason": task.get("reason"),
@@ -144,10 +142,7 @@ def score_task(task, worlds, config, contract):
         speed = float(np.linalg.norm(velocity))
         longitudinal = float(velocity @ acceleration / speed) if speed >= .01 else None
         row["groups"].update(speed_mps=speed, longitudinal_acceleration_mps2=longitudinal)
-        # Motion bins label the edited (insertion) rows only.
-        if task["world"] == "augmented":
-            row["groups"].update(speed_bin_kmh=speed_bin_label(speed * 3.6),
-                                 acceleration_bin_mps2=acceleration_bin_label(longitudinal) if longitudinal is not None else None)
+        row["groups"].update(speed_bin_kmh=speed_bin_label(speed * 3.6))
         map_context = MapContext(task["token"], world, config["work_root"])
         cache_root = Path(config["work_root"]) / "scores_at_fault"
         scores, pending = {}, defaultdict(list)
@@ -200,14 +195,18 @@ def score_task(task, worlds, config, contract):
     return row
 
 
-def process_result(root, config, *, output_root=None, backend=backend_call):
-    """Score one run; write metrics under ``output_root`` (default: the run itself)."""
+def process_result(root, config, *, output_root=None, backend=backend_call, run_dir=None):
+    """Score one run; write metrics under ``output_root`` (default: the run itself).
+
+    ``run_dir``: the benchmark run, for predictions saved without the runners' bookkeeping.
+    """
     from .rows import read_rows
     root = Path(root).resolve()
     output_root = Path(output_root).resolve() if output_root else root
-    inventory = inventory_result(root)
-    if inventory["dataset"] != "navsim":
-        return {"status": "inapplicable", "result_dir": str(root), "dataset": inventory["dataset"]}
+    inventory = inventory_result(root, run_dir=run_dir)
+    if inventory["dataset"] != "navsim" or inventory["mode"] == "original":
+        return {"status": "inapplicable", "result_dir": str(root), "dataset": inventory["dataset"],
+                "mode": inventory["mode"]}
     if not any(t["status"] == "ready" for t in inventory["tasks"]):
         raise ValueError(f"No scoreable NAVSIM predictions: {root}; inspect the saved-result inventory")
     metrics = output_root / "metrics"
@@ -238,9 +237,7 @@ def process_result(root, config, *, output_root=None, backend=backend_call):
                     "per_sample_sha256": file_digest(metrics / f"{PREFIX}_per_sample.json"),
                     "complete": all(r["status"] in ("scored", "inapplicable") for r in rows)}
         write_json(metrics / f"{PREFIX}_manifest.json", manifest)
-    statistics = (summarize_original(rows, PRIMARY_METRIC) if inventory["mode"] == "original"
-                  else summarize(rows, PRIMARY_METRIC))
-    summary = {**statistics, "dataset": "navsim", "result_dir": str(root)}
+    summary = {**summarize(rows, PRIMARY_METRIC), "dataset": "navsim", "result_dir": str(root)}
     write_json(metrics / f"{PREFIX}_summary.json", summary)
     (metrics / f"{PREFIX}_error.json").unlink(missing_ok=True)
     return summary

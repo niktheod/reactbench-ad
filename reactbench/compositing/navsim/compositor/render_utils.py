@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import math
-import subprocess
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
@@ -74,13 +73,6 @@ def road_basis(
     left = np.cross(normal, forward)
     left /= np.linalg.norm(left)
     return np.column_stack([forward, left, normal])
-
-
-def current_ego_to_actor_frame(actor_position: np.ndarray, basis: np.ndarray) -> np.ndarray:
-    transform = np.eye(4, dtype=np.float64)
-    transform[:3, :3] = basis.T
-    transform[:3, 3] = -basis.T @ actor_position
-    return transform
 
 
 def actor_bbox_lidar(
@@ -340,29 +332,6 @@ def alpha_composite(background: np.ndarray, foreground_rgba: np.ndarray) -> Tupl
     composite = background.copy()
     composite[y_min:y_max, x_min:x_max] = composite_roi
     return composite, actor_mask
-
-
-def run_blender(
-    blender: Path,
-    blend_file: Path,
-    renderer: Path,
-    manifest_path: Path,
-) -> None:
-    command = [
-        str(blender),
-        "-b",
-        str(blend_file),
-        "--python",
-        str(renderer),
-        "--",
-        "--manifest",
-        str(manifest_path),
-    ]
-    completed = subprocess.run(command, text=True, capture_output=True)
-    log_path = manifest_path.with_suffix(".blender.log")
-    log_path.write_text(completed.stdout + "\n--- STDERR ---\n" + completed.stderr)
-    if completed.returncode != 0:
-        raise RuntimeError(f"Blender failed for {manifest_path}; see {log_path}")
 
 
 def save_png(path: Path, array: np.ndarray) -> None:

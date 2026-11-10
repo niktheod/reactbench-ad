@@ -28,7 +28,8 @@ which the ReactBench runner seeds per token (paired seeds, `reactbench/models/se
 - `config/pdm_scoring/default_run_pdm_score.yaml`, `config/training/default_training.yaml` and
   `config/common/agent/recogdrive_agent.yaml`: ReCogDrive as the default agent and the agent options.
 - `navsim/planning/training/dataset.py`: the unused `Dataset_For_Traj`/`Dataset_For_Pipeline` (and with them
-  `navsim/visualization/`) are removed.
+  `navsim/visualization/`) are removed; so is the unused `AgentLightningModule` (`agent_lightning_module.py`
+  keeps `AgentLightningDiT`).
 
 Dormant development options, off by default and not used in the paper (`grpo=false` in ReactTrain): the GRPO
 reward variants (`raw`, `minimum_jerk`, speed siblings; the raw-safety variant is not included and its mode

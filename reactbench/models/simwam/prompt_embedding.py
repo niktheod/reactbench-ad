@@ -14,7 +14,7 @@ from pathlib import Path
 import yaml
 
 from . import agent as adapter
-from ..common import expand_config
+from ..runner import expand_config
 
 
 def main(argv=None):

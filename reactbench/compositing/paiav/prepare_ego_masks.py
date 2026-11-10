@@ -19,7 +19,7 @@ _WORKER_LOADER = None
 
 def initialize(args, tokens):
     global _WORKER_LOADER
-    _WORKER_LOADER = PAIAVSceneLoader(args.data_root, load_selection_manifest(args.manifest),
+    _WORKER_LOADER = PAIAVSceneLoader(args.data_root, load_selection_manifest(args.manifest, args.data_root),
                                      tokens, Path(tempfile.gettempdir()),
                                      anchor_time_s=args.anchor_time_s, future_timestep=1,
                                      ego_mask_mode='dataset')
@@ -40,7 +40,7 @@ def prepare_one(token, cache, model, check_only=False):
 
 def prepare(args):
     from .edit import select_tokens
-    selection = load_selection_manifest(args.manifest)
+    selection = load_selection_manifest(args.manifest, args.data_root)
     tokens = select_tokens(selection.clip_ids, args.max_clips, args.seed)
     if not tokens:
         return []

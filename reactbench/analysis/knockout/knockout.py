@@ -26,7 +26,6 @@ from .common import (
     SampleContext,
     checked_token,
     read_tokens_file,
-    same_prediction,
     select_tokens,
     single_text,
     write_token_selection,
@@ -77,14 +76,6 @@ def build_parser(*, description: str, default_config: Path) -> argparse.Argument
     parser.add_argument(
         "--overwrite", action="store_true", help="Rerun tokens whose result file already exists."
     )
-    parser.add_argument(
-        "--check-passthrough",
-        action="store_true",
-        help=(
-            "Also run each token's natural rollout through a collector without hidden "
-            "spans and require an identical trajectory and CoT."
-        ),
-    )
     return parser
 
 
@@ -117,17 +108,11 @@ def trajectory_poses(prediction: Any) -> np.ndarray:
     return poses
 
 
-def build_collectors(
-    *, check_passthrough: bool, **kwargs: Any
-) -> tuple[ExpertAttentionCollector, ExpertAttentionCollector | None]:
-    """The knockout collector and, if asked, one without hidden spans; both uninstalled."""
+def build_collector(**kwargs: Any) -> ExpertAttentionCollector:
+    """The knockout collector (hiding the CoT), uninstalled."""
     knockout = ExpertAttentionCollector(hidden_spans=HIDDEN_SPANS, **kwargs)
     knockout.close()
-    passthrough = None
-    if check_passthrough:
-        passthrough = ExpertAttentionCollector(**kwargs)
-        passthrough.close()
-    return knockout, passthrough
+    return knockout
 
 
 def _collected_rollout(
@@ -137,10 +122,10 @@ def _collected_rollout(
     try:
         collector.reset()
         prediction = rollout(seed)
-        attention = collector.finalize(returned_cot=single_text(prediction.extra, "cot"))
+        meta = collector.finalize(returned_cot=single_text(prediction.extra, "cot"))
     finally:
         collector.close()
-    return prediction, attention
+    return prediction, meta
 
 
 def run_conditions(
@@ -149,27 +134,19 @@ def run_conditions(
     natural_seed: int,
     reseed_seed: int,
     knockout: ExpertAttentionCollector,
-    passthrough: ExpertAttentionCollector | None,
     context: SampleContext,
 ) -> dict[str, Any]:
     """The three rollouts of one input; ``rollout(diffusion_seed)`` runs the model once."""
     if knockout.hidden_spans != HIDDEN_SPANS:
         raise ValueError(f"The knockout collector must hide {[SPANS[span] for span in HIDDEN_SPANS]}")
-    if passthrough is not None and passthrough.hidden_spans:
-        raise ValueError("The passthrough collector must not hide any span")
     if natural_seed == reseed_seed:
         raise ValueError("The reseed rollout needs a different diffusion seed")
 
     context.stage = "natural_inference"
     natural = rollout(natural_seed)
     cot = single_text(natural.extra, "cot")
-    if passthrough is not None:
-        context.stage = "passthrough_inference"
-        checked, _ = _collected_rollout(passthrough, rollout, natural_seed)
-        if not same_prediction(natural, checked):
-            raise RuntimeError("The natural rollout through the collector differs from the one without it")
     context.stage = "knockout_inference"
-    knocked, attention = _collected_rollout(knockout, rollout, natural_seed)
+    knocked, collected = _collected_rollout(knockout, rollout, natural_seed)
     context.stage = "reseed_inference"
     reseeded = rollout(reseed_seed)
 
@@ -178,13 +155,11 @@ def run_conditions(
         if single_text(prediction.extra, "cot") != cot:
             raise ValueError(f"The {name} rollout generated a different CoT than the natural one")
     poses = np.stack([trajectory_poses(item) for item in (natural, knocked, reseeded)])
-    collected = attention["meta"]
     meta = {
         "conditions": list(CONDITIONS),
         "cot": cot,
         "generated_text": collected["generated_text"],
         "hidden_spans": collected["hidden_spans"],
-        "passthrough_checked": passthrough is not None,
         **{name: collected[name] for name in META_INTEGERS},
     }
     return {"poses": poses, "meta": meta}

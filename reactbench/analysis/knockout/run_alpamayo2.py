@@ -16,7 +16,7 @@ from .common import (
 from .knockout import (
     RESEED_BASE_OFFSET,
     KnockoutOutputManager,
-    build_collectors,
+    build_collector,
     build_parser,
     run_conditions,
     saved_reasoning,
@@ -26,7 +26,7 @@ from .knockout import (
 
 
 MODEL = "alpamayo2"
-DEFAULT_CONFIG = Path(__file__).resolve().parents[2] / "models" / "alpamayo2" / "config_paiav.yaml"
+DEFAULT_CONFIG = Path(__file__).resolve().parents[2] / "models" / "alpamayo2" / "config.yaml"
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -36,13 +36,18 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
     validate_args(parser, args)
-    from ...models.alpamayo2.inference import paired_seed
-    from ...models.alpamayo2.runner import load_agent, load_run
+    from ...models.alpamayo2.eval import TARGET
+    from ...models.alpamayo2.inference import Alpamayo2Inference, paired_seed
+    from ...models.alpamayo2.paiav_loader import PAIAVRun
+    from ...models.runner import read_config
 
     run_dir = resolve_directory(args.run_dir, "run directory")
-    config_path = resolve_file(args.config, "Alpamayo 2 PAI-AV configuration")
-    _, agent = load_agent("pai-av", config_path)
-    with load_run("pai-av", run_dir) as loader:
+    config_path = resolve_file(args.config, "Alpamayo 2 configuration")
+    cfg = read_config(config_path)
+    if cfg.get("_target_") != TARGET:
+        raise ValueError(f"Alpamayo 2 configuration must have _target_: {TARGET}")
+    agent = Alpamayo2Inference(**{key: value for key, value in cfg.items() if not key.startswith("_")})
+    with PAIAVRun(run_dir) as loader:
         tokens = select_run_tokens(list(loader.tokens), args)
         agent.initialize()
         model = agent.model
@@ -51,8 +56,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         expected_steps = (
             agent.diffusion_kwargs.get("inference_step") or model.expert.diffusion.num_inference_steps
         )
-        knockout, passthrough = build_collectors(
-            check_passthrough=args.check_passthrough,
+        knockout = build_collector(
             vlm=model.vlm,
             expert=model.expert.expert,
             tokenizer=model.tokenizer,
@@ -88,7 +92,6 @@ def main(argv: Sequence[str] | None = None) -> None:
                     natural_seed=natural_seed,
                     reseed_seed=reseed_seed,
                     knockout=knockout,
-                    passthrough=passthrough,
                     context=context,
                 )
             result["meta"].update(
@@ -120,8 +123,6 @@ def main(argv: Sequence[str] | None = None) -> None:
             )
         finally:
             knockout.close()
-            if passthrough is not None:
-                passthrough.close()
 
 
 if __name__ == "__main__":

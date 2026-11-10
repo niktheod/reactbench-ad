@@ -12,10 +12,10 @@ from PIL import Image
 
 
 from ... import paths
-from ..seeds import paired_seed
+from ...io import file_digest
+from ..seeds import MAX_SEED, paired_seed
 
 SIMWAM_REPO_ROOT = Path(os.environ.get("SIMWAM_REPO_ROOT", paths.REPO_ROOT / "third_party" / "SimWAM")).expanduser()
-MAX_SEED = (1 << 63) - 1
 VAE_FILE = Path("DiffSynth-Studio/Wan-Series-Converted-Safetensors/Wan2.2_VAE.safetensors")
 SUPPORTED_DATA = {"camera_layout": "front", "video_frame_mode": "current_plus_future",
                   "trajectory_mode": "absolute", "normalize_action": True, "use_dynamic_prompt": False}
@@ -78,14 +78,6 @@ def fixed_prompt(dataset_class, settings):
 def prompt_embedding_path(prompt, directory, settings):
     hashed = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
     return Path(directory) / f"{hashed}.t5_len{settings['context_len']}.{settings['text_encoder_id']}.pt"
-
-
-def file_sha256(path):
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 class SimWAMAgent:
@@ -159,7 +151,7 @@ class SimWAMAgent:
         if not path.is_file():
             raise FileNotFoundError(f"Missing fixed-prompt embedding {path}; run python -m reactbench.models.simwam.prompt_embedding")
         self.load_report.update(prompt=prompt, prompt_embedding=str(path),
-                                prompt_embedding_sha256=file_sha256(path), data_settings=self.settings)
+                                prompt_embedding_sha256=file_digest(path), data_settings=self.settings)
         return self.load_report
 
     def load(self):

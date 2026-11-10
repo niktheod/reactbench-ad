@@ -128,16 +128,6 @@ def single_text(extra: Mapping[str, Any], key: str) -> str:
     return str(values[0])
 
 
-def same_prediction(first: Any, second: Any) -> bool:
-    """Identical trajectory arrays and CoT text."""
-    for name in ("poses", "xyz", "rotations"):
-        if hasattr(first, name) != hasattr(second, name):
-            return False
-        if hasattr(first, name) and not np.array_equal(getattr(first, name), getattr(second, name)):
-            return False
-    return single_text(first.extra, "cot") == single_text(second.extra, "cot")
-
-
 def gpu_info() -> list[dict[str, Any]]:
     import torch
 

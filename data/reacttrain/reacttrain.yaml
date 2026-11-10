@@ -1,6 +1,6 @@
 # Training logs only, using training/default_train_val_test_log_split.yaml.
-# Source: navtrain.yaml; exclude failure labels in
-# edit_navsim_samples/classification_results/navtrain_benign_front25/navtrain_direction_classifications.json.
+# Source: navtrain.yaml, without the scenes that fail the placement, front-visibility or benign-clearance checks
+# of any variant (the selection scripts are not released).
 # Current speed: hypot(ego_dynamic_state[0], ego_dynamic_state[1]) at frame index 3 >= 5/3.6 m/s.
 _target_: navsim.common.dataclasses.SceneFilter
 _convert_: all

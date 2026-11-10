@@ -1,4 +1,5 @@
-_target_: reactbench.models.alpamayo2.agent_paiav.Alpamayo2Agent
+# Alpamayo 2 on ReactNAV and ReactPAI (navsim_loader.py / paiav_loader.py adapt each dataset).
+_target_: reactbench.models.alpamayo2.inference.Alpamayo2Inference
 model_name_or_path: nvidia/Alpamayo2-Super
 model_revision: 00554695e729a6ff0b6281fd2c81b18d06e33dbe
 upstream_revision: 5e7975f4a2100ee8ac1a62b79239bbabefddcbef

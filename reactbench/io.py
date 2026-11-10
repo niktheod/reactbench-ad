@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 
 
@@ -26,6 +27,22 @@ def read_json(path, default=None):
     return json.loads(path.read_text()) if path.is_file() else default
 
 
+def jsonable(value):
+    """Plain JSON values from numpy arrays and scalars, tensors, paths and tuples, recursively."""
+    import numpy as np
+    if isinstance(value, Mapping):
+        return {str(k): jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [jsonable(v) for v in value]
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, (np.ndarray, np.generic)):
+        return value.tolist()
+    if hasattr(value, "detach"):
+        return value.detach().cpu().tolist()
+    return value
+
+
 def finite_json(value):
     """Replace non-finite floats by None, recursively."""
     if isinstance(value, dict):
@@ -45,3 +62,14 @@ def write_json(path, value):
         staging.replace(path)
     finally:
         staging.unlink(missing_ok=True)
+
+
+def relative(value):
+    """Absolute paths (values and keys) reduced to their last two components, recursively (for released files)."""
+    if isinstance(value, dict):
+        return {relative(k): relative(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [relative(v) for v in value]
+    if isinstance(value, str) and value.startswith("/") and "\n" not in value:
+        return "/".join(Path(value).parts[-2:])
+    return value

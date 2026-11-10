@@ -3,6 +3,7 @@
     python -m reactbench.summarize                      # every table whose inputs exist
     python -m reactbench.summarize --tables main tir    # selected tables
     python -m reactbench.summarize --tir-curves --by-speed
+    python -m reactbench.summarize --models alpamayo1_5 mymodel --tables main tir   # your model, scored runs
 
 Tables: main (main and detailed results), tir (trajectory invariance rate), training_stages,
 fine_tuning (ReactNAV and navtest), generalization (unseen objects, real scenes),
@@ -10,7 +11,8 @@ speed_distribution, feasibility (tau = 0.5 s, unavoidable samples), cot (CoT swa
 knockout (attention knockout) and exploration_probe.
 
 Scored runs are found under ``<outputs>/predictions/<model>/<dataset>/`` (see ``runs.py``);
-``--runs MODEL:DATASET=DIR`` overrides one location. The other inputs are the outputs of their
+``--runs MODEL:DATASET=DIR`` overrides one location. ``--models`` selects the models of the benchmark tables
+(default: the six of the paper); any folder name under ``predictions/`` is a model. The other inputs are the outputs of their
 own commands (README): ``<outputs>/summaries/feasibility``, ``<outputs>/real_scenes``,
 ``<outputs>/knockout/summary.json``, ``<outputs>/exploration_probe`` and ``<outputs>/navtest_pdms``.
 Outputs go to ``<outputs>/summaries``.
@@ -50,7 +52,7 @@ def benchmark_tables(runs, args, output):
     """Main, detailed and TIR tables of each dataset, and the optional CSVs."""
     text = []
     for dataset in args.datasets:
-        models = [m for m in MODELS[dataset] if runs.insertion_runs(m, dataset)]
+        models = [m for m in (args.models or MODELS[dataset]) if runs.insertion_runs(m, dataset)]
         if not models:
             _skip(f"{dataset} benchmark tables", f"no scored {dataset} runs")
             continue
@@ -104,7 +106,7 @@ def other_tables(runs, args, output):
     if "speed_distribution" in args.tables:
         counts = {}
         for dataset in args.datasets:
-            model = next((m for m in MODELS[dataset] if runs.insertion_runs(m, dataset)), None)
+            model = next((m for m in (args.models or MODELS[dataset]) if runs.insertion_runs(m, dataset)), None)
             counts[dataset] = training.speed_distribution(runs, dataset, model) if model else {}
         write_json(output / "speed_distribution.json", counts)
         text.append(markdown.speed_distribution_table(counts))
@@ -129,6 +131,7 @@ def main(argv=None):
     parser.add_argument("--tables", nargs="+", choices=TABLES, default=list(TABLES))
     parser.add_argument("--runs", nargs="*", default=[], metavar="MODEL:DATASET=DIR")
     parser.add_argument("--datasets", nargs="+", choices=sorted(DATASETS), default=sorted(DATASETS))
+    parser.add_argument("--models", nargs="+", help="Models of the benchmark tables (default: the paper's six)")
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--tir-curves", action="store_true", help="Also write the TIR curves (CSV)")
     parser.add_argument("--by-speed", action="store_true", help="Also write dP by ego speed (CSV)")

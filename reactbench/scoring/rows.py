@@ -21,6 +21,9 @@ def read_rows(root, prefix):
         return None, manifest
     if manifest.get("per_sample_sha256") != file_digest(path):
         raise ValueError(f"Metric checksum mismatch: {path}")
+    if manifest.get("exported"):
+        # Released scores (reactbench.export): the predictions they were computed from are not part of them.
+        return read_json(path), manifest
     for source, sha in manifest.get("source_documents", {}).items():
         if not Path(source).is_file() or file_digest(source) != sha:
             raise ValueError(f"Metrics are stale relative to inference document: {source}")

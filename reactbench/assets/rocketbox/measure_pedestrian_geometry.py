@@ -1,19 +1,12 @@
-#!/usr/bin/env python3
-"""Measure full-gait pedestrian bounds and validate or update asset sidecars.
+"""Full-gait pedestrian bounds measured in Blender (``measure_gait_union_geometry``).
 
-Run with Blender, for example::
-
-    blender --background --python scripts/measure_pedestrian_geometry.py -- \
-      --asset-dir generated_assets/rocketbox/assets --write-sidecars
+Used by the Rocketbox asset builders (``create_rocketbox_assets.py``, ``create_walk_cycle.py``), which record the
+measurement in each asset's sidecar; it runs inside Blender's Python.
 """
 
 from __future__ import annotations
 
-import argparse
-import fnmatch
-import json
 import math
-import os
 from pathlib import Path
 import sys
 from typing import Any, Sequence
@@ -27,33 +20,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from reactbench.scoring.pedestrian_geometry import (  # noqa: E402
     make_pedestrian_geometry,
-    normalize_pedestrian_geometry,
     union_local_bounds,
 )
-
-
-def arguments_after_double_dash() -> list[str]:
-    return sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--asset-dir", type=Path, required=True)
-    parser.add_argument(
-        "--asset",
-        action="append",
-        default=[],
-        metavar="NAME_OR_GLOB",
-        help="Measure only matching asset stems; repeatable.",
-    )
-    parser.add_argument(
-        "--write-sidecars",
-        action="store_true",
-        help="Atomically add/replace actor_geometry instead of checking it.",
-    )
-    args = parser.parse_args(arguments_after_double_dash())
-    args.asset_dir = args.asset_dir.expanduser().resolve()
-    return args
 
 
 def _is_descendant_of(obj: bpy.types.Object, root: bpy.types.Object) -> bool:
@@ -169,104 +137,3 @@ def measure_gait_union_geometry(
         blender_version=bpy.app.version_string,
     )
     return geometry, per_frame
-
-
-def geometry_from_sidecar(metadata: dict[str, Any]) -> dict[str, Any]:
-    try:
-        asset_id = str(metadata["id"])
-        renderer_root = str(metadata["renderer_root"])
-        local_forward_axis = str(metadata["local_forward_axis"])
-        frame_start = int(metadata["animation_frame_start"])
-        frame_count = int(metadata["walk_cycle_frames"])
-    except (KeyError, TypeError, ValueError) as exc:
-        raise ValueError(
-            "Sidecar must contain id, renderer_root, local_forward_axis, "
-            "animation_frame_start, and walk_cycle_frames"
-        ) from exc
-    geometry, _per_frame = measure_gait_union_geometry(
-        asset_id=asset_id,
-        renderer_root=renderer_root,
-        local_forward_axis=local_forward_axis,
-        frame_start=frame_start,
-        frame_end_exclusive=frame_start + frame_count,
-    )
-    return geometry
-
-
-def _atomic_json(path: Path, value: Any) -> None:
-    temporary = path.with_name(f".{path.name}.tmp.{os.getpid()}")
-    temporary.write_text(
-        json.dumps(value, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    os.replace(temporary, path)
-
-
-def _selected(paths: Sequence[Path], patterns: Sequence[str]) -> list[Path]:
-    if not patterns:
-        return list(paths)
-    return [
-        path
-        for path in paths
-        if any(fnmatch.fnmatchcase(path.stem, pattern) for pattern in patterns)
-    ]
-
-
-def main() -> None:
-    args = parse_args()
-    if not args.asset_dir.is_dir():
-        raise FileNotFoundError(f"Asset directory not found: {args.asset_dir}")
-    assets = _selected(
-        sorted(path for path in args.asset_dir.glob("*.blend") if path.is_file()),
-        args.asset,
-    )
-    if not assets:
-        raise FileNotFoundError("No matching pedestrian .blend assets found")
-
-    failures = []
-    for blend_path in assets:
-        sidecar_path = blend_path.with_suffix(".json")
-        try:
-            metadata = json.loads(sidecar_path.read_text(encoding="utf-8"))
-            bpy.ops.wm.open_mainfile(filepath=str(blend_path), load_ui=False)
-            measured = geometry_from_sidecar(metadata)
-            if args.write_sidecars:
-                metadata["actor_geometry"] = measured
-                _atomic_json(sidecar_path, metadata)
-                status = "UPDATED"
-            else:
-                recorded = normalize_pedestrian_geometry(
-                    metadata.get("actor_geometry"),
-                    expected_asset_id=str(metadata.get("id", "")),
-                )
-                if recorded != measured:
-                    raise ValueError(
-                        "recorded actor_geometry differs from a fresh full-gait "
-                        "measurement"
-                    )
-                status = "VALID"
-            print(
-                f"{status} {blend_path.name}: "
-                f"bounds={measured['local_bounds_m']}",
-                flush=True,
-            )
-        except Exception as exc:
-            failures.append((str(blend_path), str(exc)))
-            print(f"INVALID {blend_path}: {exc}", file=sys.stderr, flush=True)
-    print(
-        "PEDESTRIAN_GEOMETRY_SUMMARY="
-        + json.dumps(
-            {
-                "asset_count": len(assets),
-                "failure_count": len(failures),
-                "write_sidecars": bool(args.write_sidecars),
-            },
-            sort_keys=True,
-        )
-    )
-    if failures:
-        raise SystemExit(1)
-
-
-if __name__ == "__main__":
-    main()

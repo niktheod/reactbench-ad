@@ -10,10 +10,10 @@ cache length and expert position offset match a natural rollout.
 
 The natural prompt construction, paired seeding and rollout are reused by
 temporarily overriding three instance attributes, so the natural runner
-(``inference.py``/``runner.py``) needs no forced-CoT code; Alpamayo 1.5's format
+(``inference.py``/``eval.py``) needs no forced-CoT code; Alpamayo 1.5's format
 is in ``models/alpamayo1_5/forced_cot.py``. Note that the original-cache signature
-(``runner.signature_for``) hashes these runner sources and Alpamayo 1.5's
-``agent_paiav.py``/``agent_navsim.py``, so editing any of them changes it.
+(``eval.ADAPTER_SOURCES``) hashes the runner sources and Alpamayo 1.5's
+``agent.py``/``inputs.py``, so editing any of them changes it.
 """
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from typing import Any, Mapping
 
 import numpy as np
 
-from ..original_cache import file_sha256
+from ...io import file_digest
 
 
 TRAJ_FUTURE_START = "<|traj_future_start|>"
@@ -159,4 +159,4 @@ def compute_forced_trajectory(inference, agent_input, cot: str, *, text_seed: in
 
 def adapter_identity() -> dict[str, Any]:
     return {"version": ADAPTER_VERSION, "prefix_format": PREFIX_FORMAT,
-            "generation_steps": 1, "source_sha256": file_sha256(Path(__file__))}
+            "generation_steps": 1, "source_sha256": file_digest(Path(__file__))}

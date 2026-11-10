@@ -1,0 +1,34 @@
+# Alpamayo 1.5 on ReactNAV and ReactPAI (inputs.py adapts each dataset to the model's inputs).
+_target_: reactbench.models.alpamayo1_5.agent.AlpamayoAgent
+_convert_: all
+
+model_name_or_path: nvidia/Alpamayo-1.5-10B
+revision: 7aba8293c09993f2e125c6819df05d7fa3e873ea   # the evaluated weights
+device: cuda
+dtype: bfloat16
+attn_implementation: flash_attention_2
+local_files_only: false
+
+# Official single-sample rollout settings. The VLM seed is reset before each inference, so both members of a
+# pair start from the same VLM random stream.
+top_p: 0.98
+top_k: null
+temperature: 0.6
+num_traj_samples: 1
+max_generation_length: 256
+seed: 42
+
+# A stable per-token seed is derived from this base. Original and edited members share identical diffusion
+# noise, while different tokens receive different noise. Change the base for an independent replicate.
+diffusion_seed_base: 42
+diffusion_kwargs: {}
+
+# Four camera frames and sixteen 10 Hz ego-history poses (interpolated from NAVSIM's four 2 Hz poses).
+history_steps: 16
+frames_per_camera: 4
+
+# Save Alpamayo's complete 6.4-second prediction; the four-second prefix is scored.
+trajectory_sampling:
+  time_horizon: 6.4
+  interval_length: 0.1
+metric_horizon_s: 4.0

@@ -17,7 +17,7 @@ def sample_record(*, token: str, output_stem: str, speed_mps: float, actor_motio
     """Bookkeeping fields of one sample."""
     from .actor_motion import validated_motion
     from .geometry import vehicle_footprint_parameters
-    from .motion_bins import acceleration_bin_label, speed_bin_label
+    from .motion_bins import speed_bin_label
     import numpy as np
     speed_mps = float(speed_mps)
     if not np.isfinite(speed_mps) or speed_mps < 0:
@@ -39,7 +39,6 @@ def sample_record(*, token: str, output_stem: str, speed_mps: float, actor_motio
         "speed_mps": speed_mps, "speed_kmh": speed_kmh,
         "speed_bin_kmh": speed_bin_label(speed_kmh),
         "longitudinal_acceleration_mps2": longitudinal_acceleration_mps2,
-        "acceleration_bin_mps2": acceleration_bin_label(longitudinal_acceleration_mps2),
         "ego_origin": "rear_axle", "vehicle_footprint": vehicle_footprint_parameters(vehicle_geometry),
         "actor_type": actor_type, "actor_motion": motion,
     }

@@ -248,6 +248,7 @@ def _catalog_clip_chunk_ids(
     path: Path,
     document: dict,
     clip_ids: Sequence[str],
+    data_root: Path | None = None,
 ) -> tuple[dict[str, int], Path, str]:
     dataset = document.get("dataset")
     catalog_inputs = dataset.get("catalog_inputs") if isinstance(dataset, Mapping) else None
@@ -260,9 +261,13 @@ def _catalog_clip_chunk_ids(
         raise PAIAVDataError(
             "Dataset manifest must reference dataset.catalog_inputs/clip_index.parquet"
         )
-    index_path = _manifest_reference(
-        path, index_record.get("path"), "Dataset clip index"
-    )
+    if index_record.get("path") is None and data_root is not None:
+        # The released manifest names no paths: the catalog sits at the root of the PAI-AV download.
+        index_path = Path(data_root).expanduser().resolve() / "clip_index.parquet"
+    else:
+        index_path = _manifest_reference(
+            path, index_record.get("path"), "Dataset clip index"
+        )
     if not index_path.is_file():
         raise FileNotFoundError(f"PAI-AV catalog clip index not found: {index_path}")
     declared_size = index_record.get("size_bytes")
@@ -305,7 +310,7 @@ def _catalog_clip_chunk_ids(
     return mapping, index_path, actual_sha256
 
 
-def _dataset_manifest(path: Path, document: dict) -> SelectedClips:
+def _dataset_manifest(path: Path, document: dict, data_root: Path | None = None) -> SelectedClips:
     samples = document.get("samples")
     if not isinstance(samples, Mapping):
         raise PAIAVDataError("Dataset manifest has no samples object")
@@ -356,7 +361,7 @@ def _dataset_manifest(path: Path, document: dict) -> SelectedClips:
         chunks[chunk_id] = ChunkSource(chunk_id, feature_files, clip_count)
 
     clip_chunk_ids, index_path, index_sha256 = _catalog_clip_chunk_ids(
-        path, document, clip_ids
+        path, document, clip_ids, data_root
     )
     undeclared = sorted(set(clip_chunk_ids.values()) - set(chunks))
     if undeclared:
@@ -387,7 +392,8 @@ def _dataset_manifest(path: Path, document: dict) -> SelectedClips:
     )
 
 
-def load_selection_manifest(path: Path) -> SelectedClips:
+def load_selection_manifest(path: Path, data_root: Path | None = None) -> SelectedClips:
+    """``data_root``: the PAI-AV download, where the catalog files are when the manifest names no path."""
     path = path.expanduser().resolve()
     if not path.is_file():
         raise FileNotFoundError(f"PAI-AV manifest not found: {path}")
@@ -397,7 +403,7 @@ def load_selection_manifest(path: Path) -> SelectedClips:
     role = document.get("document_role")
     if role != "pai_av_dataset_manifest":
         raise PAIAVDataError(f"Unsupported PAI-AV manifest role in {path}: {role!r}")
-    return _dataset_manifest(path, document)
+    return _dataset_manifest(path, document, data_root)
 
 
 def resolve_chunk_feature_paths(

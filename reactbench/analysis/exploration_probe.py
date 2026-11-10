@@ -129,10 +129,13 @@ def source_metric_files(root):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--manifest", type=Path, required=True, help="ReactTrain manifest (training samples)")
+    work = paths.get("reacttrain_work", paths.outputs("reacttrain"))
+    parser.add_argument("--manifest", type=Path,
+                        default=work / "recogdrive_mixed_training" / "navtrain_selected_t34_v1" / "manifest.json",
+                        help="ReactTrain manifest of the tau = 1.5 and 2.0 s edits (scripts/reacttrain/view.sh)")
     parser.add_argument("--source-metric-cache", type=Path, default=None,
                         help="navtrain metric cache of the source scenes (lane polygons; default: "
-                             "the navtrain_metric_cache path)")
+                             "navtrain_metric_cache, else <reacttrain_work>/metric_cache_train)")
     parser.add_argument("--checkpoint", type=Path, default=None, help="Default: the released IL checkpoint")
     parser.add_argument("--scenes", type=int, default=300)
     parser.add_argument("--candidates", type=int, default=32)
@@ -168,7 +171,8 @@ def main(argv=None):
     scorer_config = GRPOConfig().scorer_config
     sampling = TrajectorySampling(time_horizon=4, interval_length=.1)
     worlds = RawWorlds(split_config(config, "trainval"))
-    metric_files = source_metric_files(args.source_metric_cache or paths.get("navtrain_metric_cache"))
+    metric_files = source_metric_files(args.source_metric_cache
+                                       or paths.get("navtrain_metric_cache", work / "metric_cache_train"))
     lanes = tempfile.TemporaryDirectory()  # per-scene lane sidecars, removed at the end
     groups = []
     try:

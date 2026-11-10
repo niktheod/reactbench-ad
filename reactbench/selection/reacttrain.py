@@ -1,12 +1,12 @@
 """ReactTrain source scenes (paper appendix, ReactTrain).
 
 ``data/reacttrain/reacttrain.yaml`` holds the 8,734 navtrain training-log scenes with an ego speed of at least
-5 km/h whose hazardous and benign variants of all three objects pass the placement, front-visibility and
-benign-clearance checks at every look-ahead time (``classify_samples.py --split navtrain --benign``);
-``benign_sides.json`` holds the side of each benign object. The 24 runs draw the same 2,000 of them
+5 km/h at the current frame whose hazardous and benign variants of all three objects pass the placement,
+front-visibility and benign-clearance checks at every look-ahead time; ``directions.json`` holds the crossing
+side and ``benign_sides.json`` the side of each benign object. The 24 runs draw the same 2,000 scenes of them
 (``--max-samples 2000``, seed 42). ``intersect`` keeps the scenes rendered in all 24 runs (1,957, listed in
-``data/reacttrain/sources.txt``): it moves the other scenes' images and metadata to ``<root>/excluded/`` and
-writes ``<root>/intersection_tokens.txt``, which the ReactTrain caches read.
+``data/reacttrain/sources.txt``): it moves the other scenes' images and metadata to ``<root>/excluded/`` and writes
+``<root>/intersection_tokens.txt``, which the ReactTrain caches read.
 
     python -m reactbench.selection.reacttrain intersect datasets/reacttrain
 """
@@ -21,8 +21,6 @@ from .. import paths
 
 RUN = re.compile(r"^(benign|hazardous)_(car|standing|walking)_timestep_([1-4])_n[0-9]+$")
 SOURCES = paths.REPO_ROOT / "data" / "reacttrain" / "sources.txt"
-
-
 def successful_tokens(run):
     final = {p.name for p in (run / "final_images").iterdir() if p.is_dir()}
     metadata = {p.stem for p in (run / "metadata").glob("*.json")}

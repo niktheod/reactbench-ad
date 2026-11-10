@@ -107,35 +107,14 @@ def transition_tokens(rows, metric):
 
 def summarize(rows, metric="nc"):
     groups = {}
-    for field in ("actor_type", "placement_timestep", "speed_bin_kmh", "acceleration_bin_mps2"):
+    for field in ("actor_type", "placement_timestep", "speed_bin_kmh"):
         buckets = defaultdict(list)
         for row in rows:
             if row.get("groups", {}).get(field) is not None:
                 buckets[str(row["groups"][field])].append(row)
-        labels = sorted(buckets, key=speed_bin_sort_key if field in ("speed_bin_kmh", "acceleration_bin_mps2") else None)
+        labels = sorted(buckets, key=speed_bin_sort_key if field == "speed_bin_kmh" else None)
         groups[field] = {k: comparison_summary(buckets[k], metric) for k in labels}
     return {"version": CONTRACT["version"], "contract": CONTRACT, "family": "at_fault",
             "transition_tokens": transition_tokens(rows, metric), "primary_metric": metric, "overall": comparison_summary(rows, metric), "groups": groups,
             "by_pair": {name: comparison_summary(rows, metric, name)
                         for name in sorted({n for r in rows for n in r.get("pairs", {})})}}
-
-
-def summarize_original(rows, metric="nc_dac"):
-    """Absolute clean-scene rates, using one valid cohort for the requested metric."""
-    nc = "nc"
-    if metric not in (nc, "nc_dac"):
-        raise ValueError(f"Unsupported original-scene metric: {metric}")
-    metrics = (nc, "dac", "nc_dac") if metric == "nc_dac" else (nc,)
-    scores = [score for row in rows for score in row.get("scores", {}).values()
-              if score_value(score, metric) is not None]
-    expected = sum(max(1, len(row.get("prediction_sources", row.get("scores", {})))) for row in rows)
-    return {"version": CONTRACT["version"], "mode": "original", "world": "clean",
-            "contract": CONTRACT, "family": "at_fault", "primary_metric": metric,
-            "aggregation": ("Mean of per-prediction products; exclude unavailable scores/DAC" if metric == "nc_dac"
-                            else f"Mean of per-prediction {nc}; exclude unavailable scores"),
-            "overall": {"sample_count": len(rows), "prediction_count": expected,
-                        "valid_count": len(scores), "excluded_count": expected - len(scores),
-                        **{f"mean_{metric}": mean([score_value(s, metric) for s in scores])
-                           for metric in metrics},
-                        "coverage": dict(Counter(r.get("status", "unknown") for r in rows)),
-                        "errors": dict(Counter(str(v) for r in rows for v in r.get("errors", {}).values()))}}

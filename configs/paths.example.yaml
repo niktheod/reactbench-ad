@@ -2,12 +2,12 @@
 # Any key can also be set with the environment variable REACTBENCH_<KEY> (upper case).
 
 # --- Source datasets -----------------------------------------------------------------------
-navsim_data: /data/navsim                                 # OpenScene/NAVSIM layout: navsim_logs/{test,trainval},
+navsim_data: <NAVSIM data root>                          # OpenScene/NAVSIM layout: navsim_logs/{test,trainval},
                                                           # sensor_blobs/{test,trainval}, maps/
 # navsim_logs_test, navsim_sensor_blobs_trainval, nuplan_maps, ...: override single parts
-paiav_root: /data/pai-av                                  # PhysicalAI-Autonomous-Vehicles download
+paiav_root: <PAI-AV download root>                         # PhysicalAI-Autonomous-Vehicles download
                                                           # (python -m reactbench.datasets.download_reactpai)
-# navsim_metric_cache: /data/navsim/exp/metric_cache      # NAVSIM v2 navtest metric cache, only to re-extract the
+# navsim_metric_cache: <NAVSIM v2 navtest metric cache>   # NAVSIM v2 navtest metric cache, only to re-extract the
                                                           # lane polygons or rebuild the real-scenes file
 # navtrain_metric_cache: outputs/reacttrain/metric_cache_train   # navtrain metric cache (exploration probe lanes)
 # navtest_pdms_metric_cache: outputs/work/metric_cache_navtest   # navtest metric cache of scripts/navtest_pdms.sh
@@ -22,17 +22,17 @@ reactpai_manifest: data/reactpai/selection_manifest.json
 # --- Assets and tools ---------------------------------------------------------------------------
 # assets: assets                                          # scripts/assets.sh output
 # blender: third_party/blender-4.5.11-linux-x64/blender   # installed by third_party/setup.sh
-# depth_python: /path/to/env/bin/python                   # Python with torch + transformers for Depth Anything
+# depth_python: <env>/bin/python                          # Python with torch + transformers for Depth Anything
                                                           # (default: the compositing Python)
 # hf_home: outputs/work/hf_cache                          # Hugging Face cache (Alpamayo weights, Depth Anything)
 
 # --- Models, scoring and outputs ------------------------------------------------------------------
 checkpoints: checkpoints                                  # model weights (scripts/download_checkpoints.sh)
 outputs: outputs                                          # predictions, scores, summaries
-# autovla_inputs: /data/autovla/navtest                   # AutoVLA's preprocessed navtest samples (no CoT)
+# autovla_inputs: <AutoVLA preprocessed navtest>          # AutoVLA's preprocessed navtest samples (no CoT)
 # annotations: outputs/annotations                        # NAVSIM annotations of the model runners
 # Python with the NAVSIM devkit and nuplan-devkit, used for scoring (default: the current one)
-# scoring_python: /path/to/envs/recogdrive/bin/python
+# scoring_python: <recogdrive env>/bin/python
 # navsim_devkit: third_party/recogdrive                   # NAVSIM devkit of the scorer
 # scoring_work: outputs/work/navsim                       # scorer caches; lanes/ holds the released lane polygons
 # scoring_work_paiav: outputs/work/paiav                  # ReactPAI scorer caches (recorded worlds)

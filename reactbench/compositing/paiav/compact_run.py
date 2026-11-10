@@ -829,7 +829,7 @@ def source_reconstruction_document(
     if manifest_sha256 != actual_manifest_sha256:
         raise CompactionError("Selection-manifest SHA-256 no longer matches run config")
     try:
-        selection = load_selection_manifest(manifest_path)
+        selection = load_selection_manifest(manifest_path, data_root)
     except (OSError, ValueError, PAIAVDataError) as exc:
         raise CompactionError(f"Invalid PAI-AV source manifest: {exc}") from exc
     configured_role = dataset.get("selection_manifest_role")

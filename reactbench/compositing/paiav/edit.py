@@ -1016,7 +1016,7 @@ def main() -> int:
         validate_runtime(args)
         render_prepared(args, run_dir, prepared_tokens, index["tokens"])
         return 0
-    selection = load_selection_manifest(args.manifest)
+    selection = load_selection_manifest(args.manifest, args.data_root)
     tokens = select_tokens(selection.clip_ids, args.max_clips, args.seed)
     if not tokens:
         raise ValueError("The requested selection contains no clips")

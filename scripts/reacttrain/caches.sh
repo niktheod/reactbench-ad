@@ -11,7 +11,7 @@ LOGS="$(location navsim_logs:trainval)"
 export NAVSIM_EXP_ROOT="$EXP" NAVSIM_DEVKIT_ROOT="$FORK"
 case "${1:?original|edited}" in
     original)
-        torchrun --nproc_per_node=1 "$FORK/navsim/planning/script/run_dataset_caching_multi_node.py" \
+        "$PYTHON" -m torch.distributed.run --nproc_per_node=1 "$FORK/navsim/planning/script/run_dataset_caching_multi_node.py" \
             agent=recogdrive_agent experiment_name=recogdrive_agent_cache agent.cam_type=single \
             agent.cache_hidden_state=True agent.cache_mode=True train_test_split=navtrain \
             "worker.threads_per_node=$WORKERS" "agent.vlm_path=$CHECKPOINTS/recogdrive/VLM" \

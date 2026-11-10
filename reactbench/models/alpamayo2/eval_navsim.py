@@ -1,9 +1,9 @@
-"""Run Alpamayo 2 on a ReactNAV run: original and edited scenes.
+"""Run Alpamayo 2 on a ReactNAV run: original and edited scenes (``eval.py`` with ``--dataset reactnav``).
 
     python -m reactbench.models.alpamayo2.eval_navsim RUN_DIR --original    # cache original predictions
     python -m reactbench.models.alpamayo2.eval_navsim RUN_DIR               # edited predictions + scoring
 """
-from .runner import main
+from .eval import Alpamayo2
 
 if __name__ == "__main__":
-    raise SystemExit(main("navsim"))
+    raise SystemExit(Alpamayo2.main(__doc__, dataset="reactnav"))

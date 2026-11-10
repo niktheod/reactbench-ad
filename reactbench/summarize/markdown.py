@@ -223,4 +223,10 @@ def knockout_table(summary):
     for metric, label in KNOCKOUT_LABELS.items():
         lines.append(f"| {label} | " + " | ".join(cell(summary["models"][m]["metrics"][metric]) for m in models)
                      + f" | {cell(summary['difference'][metric], signed=True)} |")
+    # Knockout ADE by the content of the natural CoT (appendix text).
+    for name, label in (("slow_keyword", "CoT asks to slow down, stop, yield, brake or decelerate"),
+                        ("other", "Other CoTs")):
+        groups = [summary["models"][m]["ade_knockout_by_cot"][name] for m in models]
+        cells = [f"{_f(g['mean'], signed=False)} (n = {g['samples']})" for g in groups]
+        lines.append(f"| ADE KO, {label} | " + " | ".join(cells) + " | |")
     return "\n".join(lines)

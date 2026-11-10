@@ -25,61 +25,16 @@ def scored_row(token="sample"):
 
 
 class NavsimScoringTests(unittest.TestCase):
-    def test_original_clean_scene_scoring_summary_resume_and_missing_prediction(self):
-        from reactbench.scoring.navsim import score_task
-        from tests.scoring.test_navsim_metrics import world
-        from tests.scoring.test_collisions import track
-        from shapely.geometry import box
-        from types import SimpleNamespace
-
+    def test_original_scene_runs_are_inputs_not_scored(self):
         with tempfile.TemporaryDirectory(prefix="test-navsim-original-") as tmp:
             root = Path(tmp)
-            cfg = load_config(overrides={"work_root": str(root / "work")})
             (root / "trajectories").mkdir()
-            tokens = ["clear", "collision", "offroad"]
-            for token in tokens:
-                # A stopped ego is never at fault, so the colliding prediction drives into a parked car.
-                poses = np.column_stack((5 * np.arange(1, 9) * .5, np.zeros((8, 2)))) if token == "collision" else np.zeros((8, 3))
-                np.savez(root / f"trajectories/{token}.npz", trajectory=poses, interval_length_s=.5)
-            manifest = {"mode": "original", "selected_tokens": tokens,
-                        "signature": {"evaluator": "autovla-navsim", "interval_length_s": .5}}
-            write_json(root / "evaluation_manifest.json", manifest)
-
-            def load_world(token, radius):
-                value = world(track(x=10, y=0)) if token == "collision" else world()
-                if token == "offroad":
-                    value["map_polygons_wkb"] = [box(20, 20, 30, 30).wkb_hex]
-                return {**value, "source": {"token": token}, "contract": {},
-                        "initial_velocity": [0, 0], "initial_acceleration": [0, 0]}
-
-            def backend(inventory, config):
-                self.assertEqual(inventory["mode"], "original")
-                for task in inventory["tasks"]:
-                    self.assertEqual(task["world"], "clean")
-                    self.assertIsNone(task["actor_motion"])
-                    self.assertEqual(task["pairs"], {})
-                rows = [score_task(t, SimpleNamespace(load=load_world), config, "test")
-                        for t in inventory["tasks"]]
-                for row in rows:
-                    if row["token"] != "missing":
-                        self.assertEqual(row["status"], "scored", row)
-                return {"rows": rows}
-
-            summary = process_result(root, cfg, backend=backend)
-            overall = summary["overall"]
-            self.assertEqual((overall["valid_count"], overall["excluded_count"]), (3, 0))
-            self.assertAlmostEqual(overall["mean_nc"], 2 / 3)
-            self.assertAlmostEqual(overall["mean_dac"], 2 / 3)
-            self.assertAlmostEqual(overall["mean_nc_dac"], 1 / 3)
-            self.assertEqual(read_json(root / "metrics/navsim_at_fault_summary.json"), summary)
-            process_result(root, cfg, backend=lambda *_: self.fail("completed original run must resume"))
-
-            manifest["selected_tokens"].append("missing")
-            write_json(root / "evaluation_manifest.json", manifest)
-            overall = process_result(root, cfg, backend=backend)["overall"]
-            self.assertEqual((overall["sample_count"], overall["valid_count"], overall["excluded_count"]), (4, 3, 1))
-            self.assertAlmostEqual(overall["mean_nc_dac"], 1 / 3)
-            self.assertEqual(overall["coverage"], {"scored": 3, "failed": 1})
+            np.savez(root / "trajectories/t.npz", trajectory=np.zeros((8, 3)), interval_length_s=.5)
+            write_json(root / "evaluation_manifest.json", {"mode": "original", "selected_tokens": ["t"],
+                                                           "signature": {"interval_length_s": .5}})
+            summary = process_result(root, load_config(), backend=lambda *_: self.fail("original runs are not scored"))
+            self.assertEqual(summary["status"], "inapplicable")
+            self.assertFalse((root / "metrics").exists())
 
     def test_saved_rollouts_pair_by_action_token_across_changed_ranks(self):
         from reactbench.scoring.results import inventory_result, load_prediction

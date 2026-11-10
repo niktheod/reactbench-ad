@@ -17,7 +17,8 @@ import torch
 
 from ... import paths
 from .. import seeds
-from ..alpamayo1_5.agent_paiav import native_ego_history_tensors
+from ...io import file_digest
+from ..alpamayo1_5.agent import load_camera_tensor, native_ego_history_tensors
 
 
 UPSTREAM_REVISION = "5e7975f4a2100ee8ac1a62b79239bbabefddcbef"
@@ -109,7 +110,7 @@ def hardware_profile(device: str | torch.device) -> dict[str, Any]:
     if device.type != "cuda":
         return {"class": device.type, "gpu_count": 0, "gpus": []}
     if not torch.cuda.is_available():
-        raise RuntimeError("Alpamayo2 inference requires a CUDA GPU; CPU preflight needs no weights")
+        raise RuntimeError("Alpamayo2 inference requires a CUDA GPU")
     indices = [device.index] if device.index is not None else list(range(torch.cuda.device_count()))
     gpus = []
     for index in indices:
@@ -250,7 +251,9 @@ def input_tensors(agent_input: Mapping[str, Any], camera_loader):
 
 
 class Alpamayo2Inference:
-    """Dataset-independent VLM plus diffusion rollout using NVIDIA's API."""
+    """VLM plus diffusion rollout using NVIDIA's API, for ReactNAV and ReactPAI inputs (camera IDs: Alpamayo 1.5's)."""
+
+    camera_loader = staticmethod(load_camera_tensor)
 
     def __init__(
         self, *, model_name_or_path=MODEL_ID, model_revision=MODEL_REVISION,
@@ -333,13 +336,12 @@ class Alpamayo2Inference:
                     "seed_policy": SEED_POLICY, "adapter_version": 1}
         local = Path(self.model_name_or_path).expanduser()
         if local.is_dir():
-            from ..original_cache import file_sha256
             config = local / "config.json"
             shards = sorted(local.glob("*.safetensors"))
             if not config.is_file() or not shards:
                 raise ValueError("Local checkpoint requires config.json and safetensors shards")
             identity["local_checkpoint"] = {
-                "path": str(local.resolve()), "config_sha256": file_sha256(config),
+                "path": str(local.resolve()), "config_sha256": file_digest(config),
                 "files": [[p.name, p.stat().st_size, p.stat().st_mtime_ns]
                           for p in sorted(local.iterdir()) if p.is_file()],
             }
@@ -367,7 +369,7 @@ class Alpamayo2Inference:
         self.identity()
         hardware = self.hardware()
         if not hardware["gpu_count"]:
-            raise RuntimeError("Alpamayo2 inference requires a CUDA GPU; CPU preflight needs no weights")
+            raise RuntimeError("Alpamayo2 inference requires a CUDA GPU")
         if self.attn_implementation == "flash_attention_2":
             import flash_attn  # noqa: F401
         if paths.get("hf_home", required=False):

@@ -1,14 +1,13 @@
-"""Expert attention statistics collected beside the unchanged SDPA calls.
+"""Knockout of cached spans in the trajectory expert's attention, beside the unchanged SDPA calls.
 
 In Alpamayo 1.5 and Alpamayo 2 the trajectory expert is a Qwen3-VL text model:
 expert layer l attends non-causally over its action tokens and the VLM layer-l
-KV cache. The collector wraps the registered ``sdpa`` attention function. Every
-call returns the original function's output unchanged. Only for the expert's
-attention modules, the attention weights are recomputed in float64 and reduced
-to per-span sums. Nothing is written into the model, its inputs or its cache.
-
-With ``hidden_spans`` (a knockout), expert attention instead receives a copy of
-its mask that also hides those spans' keys; all other calls are unchanged.
+KV cache. The collector wraps the registered ``sdpa`` attention function and
+``vlm.generate``. It assigns every cached key to a span (sink, image, ego
+history, prompt text, CoT, action), and the expert's attention calls receive a
+copy of their mask that also hides the keys of ``hidden_spans``; every other
+call is unchanged. Each expert call is checked to see exactly the visible keys.
+Nothing is written into the model, its inputs or its cache.
 """
 
 from __future__ import annotations
@@ -27,9 +26,6 @@ IMAGE_TOKENS = ("<|vision_start|>", "<|image_pad|>", "<|vision_end|>")
 HISTORY_START_TOKEN = "<|traj_history_start|>"
 HISTORY_END_TOKEN = "<|traj_history_end|>"
 BOUNDARY_TOKEN = "<|traj_future_start|>"
-
-# Tolerance for span distributions that must sum to one (stored as float32).
-SUM_TOLERANCE = 1e-4
 
 
 @dataclass(frozen=True)
@@ -124,24 +120,6 @@ def assign_spans(
     return spans
 
 
-def head_value_gram(
-    o_proj_weight: torch.Tensor, *, num_heads: int, head_dim: int
-) -> torch.Tensor:
-    """Per-head W_O^T W_O in float64, so that ||W_O^h v||^2 = v^T G_h v."""
-    weight = o_proj_weight.detach()
-    if weight.device.type == "meta":
-        raise ValueError("The expert o_proj weight is not materialized")
-    hidden, width = weight.shape
-    if width != num_heads * head_dim:
-        raise ValueError(
-            f"o_proj takes {width} inputs; expected {num_heads} heads x {head_dim}"
-        )
-    # The attention output is reshaped from [heads, head_dim], so input column
-    # h * head_dim + i of o_proj belongs to head h.
-    per_head = weight.to(torch.float64).view(hidden, num_heads, head_dim).permute(1, 0, 2)
-    return torch.matmul(per_head.transpose(1, 2), per_head)
-
-
 def visible_keys(
     attention_mask: torch.Tensor, *, query_len: int, key_len: int
 ) -> torch.Tensor:
@@ -175,92 +153,12 @@ def visible_keys(
     return row
 
 
-def expert_attention_statistics(
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    attention_mask: torch.Tensor,
-    *,
-    gram: torch.Tensor,
-    num_key_value_groups: int,
-    scaling: float,
-    span_ids: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Mean over queries of span mass and span contribution share, per head.
-
-    Returns ``raw`` and ``share`` with shape [heads, spans] (float64) and the
-    [keys] visibility vector. For query q and key j of head h, the weight is
-    alpha = softmax(q k^T * scaling) over visible keys and the contribution is
-    alpha * ||W_O^h v_j||. Head h reads KV head h // num_key_value_groups, as in
-    ``repeat_kv``.
-    """
-    # Autocast would run these matmuls in reduced precision; inputs are read only.
-    with torch.no_grad(), torch.autocast(device_type=query.device.type, enabled=False):
-        if query.ndim != 4 or key.ndim != 4 or tuple(value.shape) != tuple(key.shape):
-            raise ValueError(
-                "Expected query [1, heads, queries, dim] and key/value "
-                "[1, kv_heads, keys, dim]"
-            )
-        batch, heads, query_len, head_dim = query.shape
-        if batch != 1 or key.shape[0] != 1:
-            raise ValueError("Expert attention statistics require batch size one")
-        if key.shape[1] * int(num_key_value_groups) != heads or key.shape[-1] != head_dim:
-            raise ValueError(
-                f"Key shape {tuple(key.shape)} does not match {heads} query heads "
-                f"with {num_key_value_groups} heads per KV head"
-            )
-        key_len = key.shape[-2]
-        if tuple(span_ids.shape) != (key_len,):
-            raise ValueError(f"Expected {key_len} span ids, got {tuple(span_ids.shape)}")
-        if tuple(gram.shape) != (heads, head_dim, head_dim):
-            raise ValueError(f"Gram shape {tuple(gram.shape)} does not match the heads")
-
-        device = query.device
-        visible = visible_keys(
-            attention_mask.to(device), query_len=query_len, key_len=key_len
-        )
-        head_to_kv = torch.arange(heads, device=device) // int(num_key_value_groups)
-        q = query[0].to(torch.float64)
-        k = key[0].to(device=device, dtype=torch.float64).index_select(0, head_to_kv)
-        v = value[0].to(device=device, dtype=torch.float64).index_select(0, head_to_kv)
-
-        scores = torch.matmul(q, k.transpose(-1, -2)) * float(scaling)
-        weights = torch.softmax(scores.masked_fill(~visible, float("-inf")), dim=-1)
-        onehot = torch.nn.functional.one_hot(
-            span_ids.to(device=device, dtype=torch.int64), num_classes=len(SPANS)
-        ).to(torch.float64)
-        raw = torch.matmul(weights, onehot).mean(dim=1)
-
-        squared = (torch.matmul(v, gram.to(device)) * v).sum(dim=-1)
-        norms = squared.clamp_min(0.0).sqrt()
-        span_contributions = torch.matmul(weights * norms[:, None, :], onehot)
-        totals = span_contributions.sum(dim=-1, keepdim=True)
-        if not bool((totals > 0).all()):
-            raise ValueError("Every attention contribution of a query vanished")
-        share = (span_contributions / totals).mean(dim=1)
-    return raw, share, visible
-
-
-def check_span_distributions(name: str, values: Any) -> None:
-    """Values [..., spans] must be finite, non-negative and sum to one."""
-    array = np.asarray(values)
-    if array.ndim < 1 or array.shape[-1] != len(SPANS):
-        raise ValueError(f"{name} must end in {len(SPANS)} spans, got {array.shape}")
-    if array.size == 0 or not np.isfinite(array).all():
-        raise ValueError(f"{name} is empty or contains non-finite values")
-    if float(array.min()) < -SUM_TOLERANCE:
-        raise ValueError(f"{name} contains negative values")
-    deviation = float(np.abs(array.astype(np.float64).sum(axis=-1) - 1.0).max())
-    if deviation > SUM_TOLERANCE:
-        raise ValueError(f"{name} does not sum to one over spans (off by {deviation:.2e})")
-
-
 def _normalized_text(text: str) -> str:
     return "".join(text.split())
 
 
 class ExpertAttentionCollector:
-    """Collect per-span expert attention during one natural rollout at a time.
+    """Knock cached spans out of the expert attention during one rollout at a time.
 
     Call ``reset()`` before each sample and ``finalize()`` after it. The
     collector is installed on construction; ``close()`` restores the SDPA
@@ -332,7 +230,6 @@ class ExpertAttentionCollector:
             self._layer_by_module[id(attention)] = index
 
         self._functions = attention_functions
-        self._gram: dict[int, torch.Tensor] = {}
         self._installed = False
         self._dispatcher: Callable[..., Any] | None = None
         self._had_local_sdpa = False
@@ -353,14 +250,14 @@ class ExpertAttentionCollector:
         original_generate = self.vlm.generate
         collector = self
 
-        def sdpa_with_statistics(module, query, key, value, attention_mask, *args, **kwargs):
+        def sdpa_with_knockout(module, query, key, value, attention_mask, *args, **kwargs):
             layer = collector._layer_by_module.get(id(module))
             is_expert = layer is not None and collector._attention_modules[layer] is module
             if is_expert and collector.hidden_spans:
                 attention_mask = collector._hide_keys(attention_mask, key_len=key.shape[-2])
             output = original_sdpa(module, query, key, value, attention_mask, *args, **kwargs)
             if is_expert:
-                collector._record(layer, module, query, key, value, attention_mask, args, kwargs)
+                collector._record(layer, query, key, attention_mask, args, kwargs)
             return output
 
         def generate(*args, **kwargs):
@@ -381,8 +278,8 @@ class ExpertAttentionCollector:
             )
             self.vlm.generate = generate
             self._generate = generate
-            self._functions["sdpa"] = sdpa_with_statistics
-            self._dispatcher = sdpa_with_statistics
+            self._functions["sdpa"] = sdpa_with_knockout
+            self._dispatcher = sdpa_with_knockout
         except BaseException:
             self.close()
             raise
@@ -435,7 +332,7 @@ class ExpertAttentionCollector:
         self._span_ids_by_device: dict[torch.device, torch.Tensor] = {}
         self._hidden_by_device: dict[torch.device, torch.Tensor] = {}
         self._step = -1
-        self._records: dict[tuple[int, int], tuple[torch.Tensor, torch.Tensor]] = {}
+        self._records: set[tuple[int, int]] = set()
 
     def _capture_generate(self, original: Callable[..., Any], args: tuple, kwargs: dict) -> Any:
         if self._generate_calls:
@@ -536,25 +433,16 @@ class ExpertAttentionCollector:
             return mask.masked_fill(hidden, torch.finfo(mask.dtype).min)
         raise TypeError(f"Unsupported attention mask dtype {mask.dtype}")
 
-    def _gram_for(self, layer: int, module: torch.nn.Module) -> torch.Tensor:
-        # The expert is frozen, so the per-head Gram matrices are computed once.
-        if layer not in self._gram:
-            self._gram[layer] = head_value_gram(
-                module.o_proj.weight, num_heads=self.num_heads, head_dim=int(module.head_dim)
-            )
-        return self._gram[layer]
-
     def _record(
         self,
         layer: int,
-        module: torch.nn.Module,
         query: torch.Tensor,
         key: torch.Tensor,
-        value: torch.Tensor,
         attention_mask: torch.Tensor | None,
         args: tuple,
         kwargs: Mapping[str, Any],
     ) -> None:
+        """Check one expert attention call: its settings and that it sees exactly the visible keys."""
         if self._step < 0 or self._cache_len is None:
             raise RuntimeError("Expert attention ran outside a captured expert call")
         if args:
@@ -576,18 +464,8 @@ class ExpertAttentionCollector:
                 f"Expert layer {layer} saw {query.shape[-2]} queries and {key.shape[-2]} "
                 f"keys; expected {self.n_action_tokens} and {expected_keys}"
             )
-        scaling = kwargs.get("scaling")
-        if scaling is None:
-            scaling = query.shape[-1] ** -0.5
-        raw, share, visible = expert_attention_statistics(
-            query,
-            key,
-            value,
-            attention_mask,
-            gram=self._gram_for(layer, module),
-            num_key_value_groups=int(module.num_key_value_groups),
-            scaling=float(scaling),
-            span_ids=self._span_ids_on(query.device),
+        visible = visible_keys(
+            attention_mask.to(query.device), query_len=query.shape[-2], key_len=key.shape[-2]
         )
         if self.hidden_spans:
             if not torch.equal(visible, ~self._hidden_keys_on(visible.device)):
@@ -599,10 +477,10 @@ class ExpertAttentionCollector:
                 "The expert attention mask hides cached keys; batch-one rollouts "
                 "should see the whole cache"
             )
-        self._records[record_key] = (raw, share)
+        self._records.add(record_key)
 
     def finalize(self, *, returned_cot: str) -> dict[str, Any]:
-        """Arrays [layers, heads, steps, spans] and metadata for the sample."""
+        """Metadata of the sample's rollout (lengths, generated text, hidden keys)."""
         if self._sequences is None or self._prompt_len is None:
             raise RuntimeError("No VLM generation was captured for this sample")
         if self._step < 0 or self._cache_len is None or self._spans is None:
@@ -612,15 +490,6 @@ class ExpertAttentionCollector:
             raise RuntimeError(f"Expected {self.expected_steps} denoising steps, observed {steps}")
         for step in range(steps):
             self._require_complete_step(step)
-
-        shape = (self.num_layers, self.num_heads, steps, len(SPANS))
-        raw_mass = np.empty(shape, dtype=np.float64)
-        contrib_share = np.empty(shape, dtype=np.float64)
-        for (step, layer), (raw, share) in self._records.items():
-            raw_mass[layer, :, step, :] = raw.detach().cpu().numpy()
-            contrib_share[layer, :, step, :] = share.detach().cpu().numpy()
-        check_span_distributions("raw_mass", raw_mass)
-        check_span_distributions("contrib_share", contrib_share)
 
         generated = self._sequences[self._prompt_len : self._cache_len]
         generated_text = self.tokenizer.decode(generated.tolist(), skip_special_tokens=False)
@@ -649,9 +518,4 @@ class ExpertAttentionCollector:
         if self.hidden_spans:
             meta["hidden_spans"] = [SPANS[span] for span in self.hidden_spans]
             meta["hidden_keys"] = hidden_keys
-        return {
-            "raw_mass": raw_mass.astype(np.float32),
-            "contrib_share": contrib_share.astype(np.float32),
-            "span_counts": span_counts,
-            "meta": meta,
-        }
+        return meta

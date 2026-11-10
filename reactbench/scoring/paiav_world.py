@@ -3,10 +3,8 @@ from __future__ import annotations
 
 import hashlib
 import io
-import json
 import re
 import zipfile
-from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -15,7 +13,6 @@ from scipy.spatial.transform import Rotation, Slerp
 
 from ..io import digest, file_digest, read_json, write_json
 
-FEATURE = "obstacle.offline"
 WORLD_VERSION = 1
 
 # Reviewed self-annotation, not a proximity/initial-overlap filter. Keep this
@@ -51,10 +48,11 @@ def apply_annotation_track_exclusions(world, exclusions):
 
 
 def pinned_dataset(manifest):
+    """(repo, commit) of the PAI-AV release; ``revision`` (released manifest) or ``catalog_hub_commit``."""
     dataset = manifest["dataset"]
-    revision = dataset.get("catalog_hub_commit", "")
+    revision = dataset.get("revision") or dataset.get("catalog_hub_commit", "")
     if not re.fullmatch(r"[0-9a-f]{40}", revision):
-        raise ValueError("Selection manifest must pin catalog_hub_commit to a commit SHA")
+        raise ValueError("Selection manifest must pin the dataset revision to a commit SHA")
     return dataset["repo_id"], revision
 
 
@@ -64,57 +62,6 @@ def checked_catalog(manifest, name, data_root):
     if file_digest(path) != source["sha256"]:
         raise ValueError(f"Catalog checksum mismatch: {path}")
     return path
-
-
-def resource_plan(manifest_path, data_root, obstacle_root, tokens=None):
-    """Read-only resource inventory; obey the pinned catalog's path/member layout."""
-    manifest = read_json(Path(manifest_path))
-    repo, revision = pinned_dataset(manifest)
-    features = pd.read_csv(checked_catalog(manifest, "features.csv", data_root)).set_index("feature")
-    feature = features.loc[FEATURE]
-    index = pd.read_parquet(checked_catalog(manifest, "clip_index.parquet", data_root))
-    presence = pd.read_parquet(checked_catalog(manifest, "metadata/feature_presence.parquet", data_root),
-                               columns=[FEATURE])
-    selected = list(manifest["samples"]["clip_ids"] if tokens is None else tokens)
-    if len(set(selected)) != len(selected):
-        raise ValueError("Duplicate requested tokens")
-    if set(selected) - set(manifest["samples"]["clip_ids"]):
-        raise ValueError("Requested tokens are not in the selected manifest")
-    groups = {}
-    for token in selected:
-        if not bool(presence.loc[token, FEATURE]):
-            raise ValueError(f"Obstacle labels unavailable in catalog: {token}")
-        chunk = int(index.loc[token, "chunk"])
-        groups.setdefault(chunk, []).append(token)
-    resources = []
-    for chunk, ids in sorted(groups.items()):
-        relative = str(feature["chunk_path"]).format(chunk_id=chunk)
-        if Path(relative).is_absolute() or ".." in Path(relative).parts:
-            raise ValueError("Unsafe resource path in feature catalog")
-        template = json.loads(feature["clip_files_in_zip"])[FEATURE]
-        resources.append({"chunk_id": chunk, "relative_path": relative,
-                          "path": str(Path(obstacle_root).resolve() / relative),
-                          "members": {token: template.format(clip_id=token) for token in ids}})
-    return {"repo_id": repo, "revision": revision, "token_count": len(selected),
-            "selection_manifest_sha256": file_digest(manifest_path), "resources": resources}
-
-
-@lru_cache(maxsize=256)
-def _hash_at_stat(path, size, mtime_ns):
-    return file_digest(Path(path))
-
-
-def verified_archive(path, repo_id, revision):
-    path = Path(path)
-    receipt = read_json(path.with_suffix(path.suffix + ".provenance.json"))
-    if not path.is_file() or receipt is None:
-        raise FileNotFoundError(f"Missing obstacle archive or acquisition receipt: {path}")
-    stat = path.stat()
-    checksum = _hash_at_stat(str(path), stat.st_size, stat.st_mtime_ns)
-    if (receipt.get("repo_id"), receipt.get("revision"), receipt.get("sha256")) != (
-            repo_id, revision, checksum):
-        raise ValueError(f"Obstacle archive provenance/checksum mismatch: {path}")
-    return checksum
 
 
 def pose_matrices(egomotion, queries):
@@ -226,10 +173,12 @@ class BackgroundWorlds:
     def load(self, context):
         cfg = self.config
         path = Path(cfg["obstacle_root"]) / context["obstacle_relative_path"]
-        archive_sha = verified_archive(path, context["repo_id"], context["revision"])
+        if not path.is_file():
+            raise FileNotFoundError(f"Missing obstacle archive (python -m reactbench.datasets.download_reactpai): {path}")
+        # The download checks every member's CRC and size; the world is keyed by the member bytes.
         obstacle_bytes = self._member(path, context["obstacle_member"])
         ego_bytes = self._member(context["offline_egomotion_path"], context["offline_egomotion_member"])
-        provenance = {**context, "archive_sha256": archive_sha,
+        provenance = {**context,
                       "obstacle_member_sha256": hashlib.sha256(obstacle_bytes).hexdigest(),
                       "offline_egomotion_member_sha256": hashlib.sha256(ego_bytes).hexdigest(),
                       "world_implementation_sha256": file_digest(__file__),

@@ -38,7 +38,8 @@ def parse_args():
 
 
 def load_device_module():
-    path = ROOT / "scripts/configure_cycles_device.py"
+    # Shared by the NAVSIM and PAI-AV compositors: reactbench/compositing/configure_cycles_device.py.
+    path = ROOT.parents[2] / "configure_cycles_device.py"
     spec = importlib.util.spec_from_file_location("cycles_config", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -808,101 +809,6 @@ def render_job(
     shadow_layer = scene.view_layers["NAVSIM_SHADOW_LAYER"]
 
     render_mode = str(job["render_mode"])
-    if render_mode == "directional_only":
-        required_passes = set(
-            job.get("required_passes", ["actor_sun", "directional_shadow"])
-        )
-        produced_passes = set(job.get("produced_passes", required_passes))
-        if required_passes != {"actor_sun", "directional_shadow"}:
-            raise ValueError(
-                f"Invalid directional required_passes: {sorted(required_passes)}"
-            )
-        if not required_passes <= produced_passes:
-            raise ValueError("Directional produced_passes do not satisfy required_passes")
-        # The VLM preview has already cached geometry, sky illumination, AO,
-        # actor depth, and the display actor.  Render only the selected Sun
-        # angle now, emitting both its actor contribution and Vdir in one pass.
-        actor_output.mute = True
-        actor_linear_output.mute = False
-        shadow_output.mute = False
-        depth_output.mute = True
-        actor_layer.use = True
-        shadow_layer.use = True
-        configure_file_output(actor_linear_output, actor_sun_path)
-        directional_shadow_path = Path(
-            job["directional_shadow_output_path"]
-        ).resolve()
-        configure_file_output(shadow_output, directional_shadow_path)
-        world_background.inputs["Strength"].default_value = 0.0
-        sun.data.energy = original_sun_energy
-        try:
-            bpy.ops.render.render(write_still=False)
-            normalize_output_file(actor_sun_path, frame)
-            normalize_output_file(directional_shadow_path, frame)
-        finally:
-            sun.data.energy = original_sun_energy
-            world_background.inputs["Strength"].default_value = original_world_strength
-            actor_output.mute = False
-            actor_linear_output.mute = True
-            shadow_output.mute = False
-            depth_output.mute = False
-            actor_layer.use = True
-            shadow_layer.use = True
-        if not actor_sun_path.is_file():
-            raise RuntimeError(
-                f"Label-selected Sun-only actor pass was not written: {actor_sun_path}"
-            )
-        if not directional_shadow_path.is_file():
-            raise RuntimeError(
-                "Label-selected directional shadow pass was not written: "
-                f"{directional_shadow_path}"
-            )
-        info_path = Path(job["render_info_path"]).resolve()
-        info_path.parent.mkdir(parents=True, exist_ok=True)
-        info_path.write_text(
-            json.dumps(
-                {
-                    "cache_key": job["cache_key"],
-                    "render_mode": render_mode,
-                    "required_passes": sorted(required_passes),
-                    "produced_passes": sorted(produced_passes),
-                    "samples": int(job["samples"]),
-                    "animation_frame": int(job["animation_frame"]),
-                    "render_region": render_region,
-                    "ideal_canvas_resolution": [width, height],
-                    "full_render_output_resolution": [render_width, render_height],
-                    "render_output_resolution": [
-                        stored_render_width,
-                        stored_render_height,
-                    ],
-                    "raw_render_storage": job["raw_render_storage"],
-                    "actor_sun_output_path": str(actor_sun_path),
-                    "directional_shadow_output_path": str(
-                        directional_shadow_path
-                    ),
-                    "foot_contact_geometry": foot_contact_geometry,
-                    **(
-                        {"standing_pose": standing_pose_diagnostics}
-                        if standing_pose_diagnostics is not None
-                        else {}
-                    ),
-                    "selected_shadow_softness": job[
-                        "shadow_label_policy"
-                    ]["softness"],
-                    "sun_angle_degrees": float(
-                        job["lighting"]["sun_angle_degrees"]
-                    ),
-                    "sun_energy": float(
-                        job["lighting"]["sun_energy"]
-                    ),
-                    "label_directional_render_version": job[
-                        "label_directional_render_version"
-                    ],
-                },
-                indent=2,
-            )
-        )
-        return
     if render_mode != "base":
         raise ValueError(f"Unsupported render_mode: {render_mode}")
 

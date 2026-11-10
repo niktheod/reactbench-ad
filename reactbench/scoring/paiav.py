@@ -19,7 +19,7 @@ import numpy as np
 from .. import paths
 from ..io import digest, file_digest, read_json, write_json
 from . import results as saved
-from .motion_bins import motion_binning_policy, speed_bin_label, acceleration_bin_label, speed_bin_sort_key
+from .motion_bins import motion_binning_policy, speed_bin_label, speed_bin_sort_key
 from .collisions import paired_outcome, score_trajectory, validate_trajectory
 from .paiav_world import BackgroundWorlds
 from .at_fault import CONTACT_SPEED_CONTRACT as AT_FAULT_CONTACT_SPEED
@@ -73,14 +73,15 @@ def at_fault_fingerprint(config):
                    "code": {name: file_digest(here / name) for name in ("at_fault.py", "ade.py", "paiav.py")}})
 
 
-def inventory_result(root):
-    inventory = saved.inventory_result(root)
+def inventory_result(root, *, run_dir=None):
+    inventory = saved.inventory_result(root, run_dir=run_dir)
     root = Path(root)
     summary = read_json(root / "metrics/summary.json", {})
     manifest = read_json(root / "evaluation_manifest.json", {})
     identity = summary.get("identity", manifest.get("identity", {}))
     run = summary.get("run_dir", identity.get("run_dir", manifest.get("source_run_dir")))
-    inventory["run_dir"] = str((root / run).resolve()) if run else None
+    inventory["run_dir"] = (str(Path(run_dir).resolve()) if run_dir else
+                            str((root / run).resolve()) if run else None)
     records = {str(r["token"]): r for r in read_json(root / "metrics/per_sample.json", [])}
     for task in inventory["tasks"]:
         if inventory["dataset"] != "pai-av":
@@ -88,8 +89,6 @@ def inventory_result(root):
         elif task["status"] == "unsupported":
             task["status"] = "ready"
             task.pop("reason", None)
-        if task["world"] == "clean":
-            task["actor_motion"] = None
         row = records.get(task["token"], {})
         for name, contrast in row.get("contrasts", {}).items():
             if "from_condition" in contrast and "to_condition" in contrast:
@@ -141,7 +140,7 @@ def _row(task, loader, worlds, config, contract):
         return row
     try:
         token = task["token"]
-        context = task.get("background_context") or loader.collision_context(token)
+        context = loader.collision_context(token)
         world, fingerprint = worlds.load(context)
         actor = None
         if task["world"] == "augmented":
@@ -160,18 +159,19 @@ def _row(task, loader, worlds, config, contract):
         # Retain numeric measurements for rebinning; reporting must not reject valid scores.
         for value_field, field, compute, label_for in (
             ("speed_kmh", "speed_bin_kmh", lambda: loader.current_speed_mps(token) * 3.6, speed_bin_label),
-            ("longitudinal_acceleration_mps2", "acceleration_bin_mps2",
-             lambda: loader.current_longitudinal_acceleration_mps2(token), acceleration_bin_label),
+            ("longitudinal_acceleration_mps2", None, lambda: loader.current_longitudinal_acceleration_mps2(token), None),
         ):
             if loader is None:
                 continue
             try:
                 value = compute()
-                row["groups"][field] = label_for(value)
+                if field is not None:
+                    row["groups"][field] = label_for(value)
                 row[value_field] = float(value) if value is not None else None
             except (ValueError, TypeError) as exc:
-                row["groups"][field] = None
-                row.setdefault("bin_warnings", {})[field] = str(exc)
+                if field is not None:
+                    row["groups"][field] = None
+                row.setdefault("bin_warnings", {})[field or value_field] = str(exc)
         from .at_fault import classify_score
         for name, source in task["predictions"].items():
             try:
@@ -270,12 +270,12 @@ def aggregate(rows):
 
 def summarize(rows):
     groups = {}
-    for field in ("actor_type", "placement_timestep", "speed_bin_kmh", "acceleration_bin_mps2"):
+    for field in ("actor_type", "placement_timestep", "speed_bin_kmh"):
         bins = defaultdict(list)
         for row in rows:
             if row["groups"].get(field) is not None:
                 bins[str(row["groups"][field])].append(row)
-        labels = sorted(bins, key=speed_bin_sort_key if field in ("speed_bin_kmh", "acceleration_bin_mps2") else None)
+        labels = sorted(bins, key=speed_bin_sort_key if field == "speed_bin_kmh" else None)
         groups[field] = {label: aggregate(bins[label]) for label in labels}
     from .reporting import summarize as raw_summary
     return {"raw_metrics": raw_summary(rows, "nc"), "version": 2,
@@ -285,62 +285,27 @@ def summarize(rows):
             "overall": aggregate(rows), "groups": groups}
 
 
-def original_contexts(root, tasks):
-    """Recover original scene provenance from a verified paired result, never its inserted actor."""
-    from .rows import read_rows
-    root = Path(root).resolve()
-    prefix = PREFIX
-    rows, manifest = read_rows(root, prefix)
-    if not rows or manifest.get("mode") == "original":
-        raise ValueError("Original context source must contain paired collision scores")
-    by_token = {row["token"]: row for row in rows}
-    contexts = {}
-    for task in tasks:
-        row = by_token[task["token"]]
-        source = row["prediction_sources"].get("original", {})
-        expected = task["predictions"].get("original", {})
-        if not expected.get("sha256") or source.get("sha256") != expected["sha256"]:
-            raise ValueError(f"Context source has a different original trajectory: {task['token']}")
-        fingerprint = row["background_fingerprint"]
-        cache = Path(manifest["config"]["work_root"]) / "worlds" / f"{fingerprint}.json"
-        stored = read_json(cache)
-        if not stored or stored.get("payload_sha256") != digest(stored["world"]):
-            raise ValueError(f"Missing or corrupt original background provenance: {cache}")
-        provenance = stored["world"]["provenance"]
-        if digest(provenance) != fingerprint or provenance["token"] != task["token"]:
-            raise ValueError(f"Background provenance mismatch: {task['token']}")
-        contexts[task["token"]] = {key: provenance[key] for key in (
-            "token", "repo_id", "revision", "chunk_id", "current_timestamp_us", "ego_geometry",
-            "selection_manifest_sha256", "obstacle_relative_path", "obstacle_member",
-            "offline_egomotion_path", "offline_egomotion_member")}
-    sources = {str(root / "metrics" / f"{prefix}_{name}.json"):
-               file_digest(root / "metrics" / f"{prefix}_{name}.json") for name in ("per_sample", "manifest")}
-    return contexts, sources
+def process_result(root, config, *, tokens=None, output_root=None, run_dir=None):
+    """Score one run; write metrics under ``output_root`` (default: the run itself).
 
-
-def process_result(root, config, *, tokens=None, original_context_result=None, output_root=None):
-    """Score one run; write metrics under ``output_root`` (default: the run itself)."""
+    ``run_dir``: the benchmark run, for predictions saved without the runners' bookkeeping.
+    """
     from ..datasets.paiav import PAIAVCompactRun
     root = Path(root).resolve()
-    inventory = inventory_result(root)
+    inventory = inventory_result(root, run_dir=run_dir)
+    if inventory["mode"] == "original":
+        return {"status": "inapplicable", "result_dir": str(root), "mode": "original"}
     tasks = inventory["tasks"]
     if tokens is not None:
         missing = set(tokens) - {t["token"] for t in tasks}
         if missing:
             raise ValueError(f"Requested tokens absent from result: {sorted(missing)[:5]}")
         tasks = [t for t in tasks if t["token"] in set(tokens)]
-    if original_context_result is not None:
-        if inventory["mode"] != "original":
-            raise ValueError("--original-context-result is only valid for original-scene scoring")
-        contexts, sources = original_contexts(original_context_result, tasks)
-        inventory["sources"].update(sources)
-        for task in tasks:
-            task["background_context"] = contexts[task["token"]]
     contract = implementation_fingerprint(config)
     worlds = BackgroundWorlds(config)
     rows, loader = [], None
     try:
-        if original_context_result is None and any(t["status"] == "ready" for t in tasks):
+        if any(t["status"] == "ready" for t in tasks):
             try:
                 loader = PAIAVCompactRun(inventory["run_dir"], validate_archive_members=False)
             except Exception as exc:
@@ -355,11 +320,7 @@ def process_result(root, config, *, tokens=None, original_context_result=None, o
         worlds.close()
         if loader is not None:
             loader.close()
-    if inventory["mode"] == "original":
-        from .reporting import summarize_original
-        summary = {**summarize_original(rows, "nc"), "dataset": "pai-av", "result_dir": str(root)}
-    else:
-        summary = summarize(rows)
+    summary = summarize(rows)
     summary["motion_binning"] = motion_binning_policy()
     output = (Path(output_root).resolve() if output_root else root) / "metrics"
     write_json(output / f"{PREFIX}_per_sample.json", rows)
@@ -369,12 +330,12 @@ def process_result(root, config, *, tokens=None, original_context_result=None, o
         "run_dir": inventory["run_dir"], "mode": inventory["mode"], "config": config,
         "contract_fingerprint": at_fault_fingerprint(config), "physical_contract_fingerprint": contract,
         "collision_contract": AT_FAULT_CONTRACT,
-        "original_context_result": str(Path(original_context_result).resolve()) if original_context_result is not None else None,
         "contact_speed_metric": AT_FAULT_CONTACT_SPEED,
         "motion_binning": motion_binning_policy(),
         "source_documents": inventory["sources"], "selection": [t["token"] for t in tasks],
         "partial_selection": tokens is not None, "per_sample_sha256": file_digest(output / f"{PREFIX}_per_sample.json"),
         "status": "complete" if all(r["status"] in ("scored", "inapplicable") for r in rows) else "incomplete"})
+    (output / f"{PREFIX}_error.json").unlink(missing_ok=True)
     return {"result_dir": str(root), **summary["overall"]}
 
 
@@ -386,7 +347,8 @@ def postprocess_evaluation(root, mode="score"):
         summary = process_result(root, load_config())
         print(f"ReactPAI scoring: {root}; coverage={summary.get('coverage')}", flush=True)
     except Exception as exc:
-        write_json(Path(root) / "metrics" / f"{PREFIX}_manifest.json", {"status": "failed", "reason": str(exc)})
+        # Earlier valid scores stay readable; the error goes next to them.
+        write_json(Path(root) / "metrics" / f"{PREFIX}_error.json", {"status": "failed", "reason": str(exc)})
         print(f"ReactPAI scoring failed; saved predictions remain available: {exc}", flush=True)
 
 

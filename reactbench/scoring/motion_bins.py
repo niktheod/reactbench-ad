@@ -1,7 +1,7 @@
-"""Ego-motion projection and the fixed-width speed and acceleration bins of the result tables.
+"""Ego-motion projection and the fixed-width speed bins of the result tables.
 
-Every scored sample is labelled with its ego speed at the current frame in 5 km/h bins (``[20,25)``) and its
-longitudinal acceleration in 0.5 m/s^2 bins; bins are never merged.
+Every scored sample is labelled with its ego speed at the current frame in 5 km/h bins (``[20,25)``); bins are
+never merged.
 """
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ from typing import Any, Optional, Sequence
 
 
 SPEED_BIN_WIDTH_KMH = 5.0
-ACCELERATION_BIN_WIDTH_MPS2 = 0.5
 MINIMUM_PROJECTION_SPEED_MPS = 0.01
 
 
@@ -95,38 +94,16 @@ def speed_bin_label(speed_kmh: float) -> str:
     return _base_label(index, index + 1, SPEED_BIN_WIDTH_KMH)
 
 
-def acceleration_bin_label(longitudinal_acceleration_mps2: Optional[float]) -> Optional[str]:
-    """The 0.5 m/s^2 bin of a longitudinal acceleration (None stays None)."""
-
-    if longitudinal_acceleration_mps2 is None:
-        return None
-    value = _finite_float(
-        longitudinal_acceleration_mps2, "longitudinal_acceleration_mps2"
-    )
-    index = _bin_index(value, ACCELERATION_BIN_WIDTH_MPS2)
-    return _base_label(index, index + 1, ACCELERATION_BIN_WIDTH_MPS2)
-
-
 def motion_binning_policy() -> dict[str, Any]:
     """Reporting bins cover all finite measurements without cohort-dependent merging."""
-    return {"id": "fixed-width-motion-v1", "speed_width_kmh": SPEED_BIN_WIDTH_KMH,
-            "acceleration_width_mps2": ACCELERATION_BIN_WIDTH_MPS2,
+    return {"id": "fixed-width-speed-v1", "speed_width_kmh": SPEED_BIN_WIDTH_KMH,
             "origin": 0, "interval_convention": "[lower, upper)", "sparse_merge": False}
 
 
-def observed_motion_labels(rows, field):
-    """Numerically order saved bins, including historical frozen/merged labels."""
-    return sorted({r.get("groups", {}).get(field) for r in rows
-                   if r.get("groups", {}).get(field) is not None}, key=speed_bin_sort_key)
-
-
 def speed_bin_sort_key(label: str) -> float:
-    """Return the lower boundary of a canonical or legacy speed label."""
+    """Return the lower boundary of a speed label."""
 
     match = _INTERVAL_LABEL.fullmatch(label)
-    if match is not None:
-        return _finite_float(match.group("lower"), "speed-bin lower boundary")
-    lower, separator, _ = label.partition("-")
-    if not separator:
+    if match is None:
         raise ValueError(f"Invalid speed-bin label: {label!r}")
-    return _finite_float(lower, "speed-bin lower boundary")
+    return _finite_float(match.group("lower"), "speed-bin lower boundary")

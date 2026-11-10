@@ -11,7 +11,7 @@ GPUS="${GPUS:-1}"; (( 16 % GPUS == 0 )) || { echo "GPUS must divide 16" >&2; exi
 IL="$CHECKPOINTS/recogdrive/IL/ReCogDrive_Diffusion_Planner_2B_IL.ckpt"
 OUT="${OUTPUT_DIR:-$EXP/training/il_rt_seed0}"
 export NAVSIM_EXP_ROOT="$EXP"
-exec torchrun --nproc_per_node="$GPUS" --master_port="${MASTER_PORT:-29523}" \
+exec "$PYTHON" -m torch.distributed.run --nproc_per_node="$GPUS" --master_port="${MASTER_PORT:-29523}" \
     "$FORK/navsim/planning/script/run_training_recogdrive_rl.py" \
     agent=recogdrive_agent agent.lr=3e-5 seed=0 "agent.vlm_path=$CHECKPOINTS/recogdrive/VLM" \
     agent.cam_type=single agent.grpo=false agent.cache_hidden_state=true agent.vlm_type=internvl \

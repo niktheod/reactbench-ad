@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -18,7 +17,7 @@ from .common import (
 from .knockout import (
     RESEED_BASE_OFFSET,
     KnockoutOutputManager,
-    build_collectors,
+    build_collector,
     build_parser,
     run_conditions,
     saved_reasoning,
@@ -28,7 +27,7 @@ from .knockout import (
 
 
 MODEL = "alpamayo1_5"
-DEFAULT_CONFIG = Path(__file__).resolve().parents[2] / "models" / "alpamayo1_5" / "config_paiav.yaml"
+DEFAULT_CONFIG = Path(__file__).resolve().parents[2] / "models" / "alpamayo1_5" / "config.yaml"
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -41,14 +40,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     from hydra.utils import instantiate
 
     from ...datasets.paiav import PAIAVCompactRun
-    from ...models.alpamayo1_5 import eval_paiav as evaluation
-    from ...models.alpamayo1_5.inference import AlpamayoInference
+    from ...models.alpamayo1_5.eval import SEED_NAMESPACE
+    from ...models.alpamayo1_5.inputs import model_input
+    from ...models.seeds import paired_seed
 
     run_dir = resolve_directory(args.run_dir, "run directory")
-    config_path = resolve_file(args.config, "Alpamayo PAI-AV configuration")
+    config_path = resolve_file(args.config, "Alpamayo 1.5 configuration")
     cfg = load_yaml_mapping(config_path)
-    inference = AlpamayoInference.from_config(cfg)
-    reseed = dataclasses.replace(inference, seed_base=inference.seed_base + RESEED_BASE_OFFSET)
+    seed_base = int(cfg.get("diffusion_seed_base", 42))
 
     with PAIAVCompactRun(run_dir) as loader:
         tokens = select_run_tokens(list(loader.tokens), args)
@@ -56,8 +55,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         agent.initialize()
         model = agent.model
         expected_steps = agent.diffusion_kwargs.get("inference_step") or model.diffusion.num_inference_steps
-        knockout, passthrough = build_collectors(
-            check_passthrough=args.check_passthrough,
+        knockout = build_collector(
             vlm=model.vlm,
             expert=model.expert,
             tokenizer=model.tokenizer,
@@ -69,25 +67,15 @@ def main(argv: Sequence[str] | None = None) -> None:
 
         def run_one(token: str, context: SampleContext) -> dict[str, Any]:
             context.stage = "load_input"
-            natural_seed = inference.seed_for_token(token)
-            reseed_seed = reseed.seed_for_token(token)
+            natural_seed = paired_seed(SEED_NAMESPACE, seed_base, token)
+            reseed_seed = paired_seed(SEED_NAMESPACE, seed_base + RESEED_BASE_OFFSET, token)
             context.details.update(diffusion_seed=natural_seed, reseed_diffusion_seed=reseed_seed)
-            ego_history, _ = loader.ego_history(token)
-            with loader.materialize_original_images(token) as original_paths:
-                model_input = evaluation.make_input(
-                    ego_history,
-                    original_paths,
-                    zero_ego_state=False,
-                    navigation_command=None,
-                )
+            with model_input(loader, token, original=True) as agent_input:
                 result = run_conditions(
-                    lambda seed: agent.compute_trajectory(
-                        model_input, **inference.seed_kwargs(seed)
-                    ),
+                    lambda seed: agent.compute_trajectory(agent_input, diffusion_seed=seed),
                     natural_seed=natural_seed,
                     reseed_seed=reseed_seed,
                     knockout=knockout,
-                    passthrough=passthrough,
                     context=context,
                 )
             saved = saved_reasoning(MODEL, token)
@@ -119,8 +107,6 @@ def main(argv: Sequence[str] | None = None) -> None:
             )
         finally:
             knockout.close()
-            if passthrough is not None:
-                passthrough.close()
 
 
 if __name__ == "__main__":

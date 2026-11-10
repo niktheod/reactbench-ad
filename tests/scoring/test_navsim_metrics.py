@@ -4,7 +4,7 @@ import numpy as np
 from shapely.geometry import box
 from tests.scoring.reference import score_prediction
 from reactbench.scoring.collisions import first_contact_speed, paired_outcome, sample_pose
-from reactbench.scoring.reporting import comparison_summary, contact_summary, summarize_original
+from reactbench.scoring.reporting import comparison_summary, contact_summary
 from tests.scoring.test_collisions import GEOMETRY, motion, track
 
 
@@ -14,19 +14,6 @@ def world(*tracks):
 
 
 class RawMetricTests(unittest.TestCase):
-    def test_original_missing_map_is_excluded_even_when_collision_fails(self):
-        poses = np.zeros((8, 3))
-        clear = score_prediction(poses, .5, None, world())
-        missing = score_prediction(poses, .5, None, {**world(track(x=0, y=0)), "map_status": "unavailable"})
-        self.assertEqual(missing["nc_all"], 0)
-        rows = [{"status": status, "scores": {"original": score}}
-                for status, score in (("scored", clear), ("partial", missing), ("failed", None))]
-        overall = summarize_original(rows)["overall"]
-        self.assertEqual((overall["valid_count"], overall["excluded_count"]), (1, 2))
-        self.assertEqual(overall["mean_nc_dac"], 1.)
-        self.assertEqual(overall["mean_nc"], 1.)
-        self.assertIsNone(summarize_original(rows[1:])["overall"]["mean_nc_dac"])
-
     def test_native_half_second_contact_and_impossible_stationary_prediction(self):
         poses = np.column_stack((5*np.arange(1, 9)*.5, np.zeros((8, 2))))
         score = score_prediction(poses, .5, motion(), world())

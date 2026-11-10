@@ -18,9 +18,7 @@ import tempfile
 import numpy as np
 
 from ...io import digest
-from ...datasets.paiav import (
-    CAMERA_NAMES, CameraSource, PAIAVCompactRun, PAIAVContractError, _pose_matrices,
-)
+from ...datasets.paiav import CAMERA_NAMES, CameraSource, PAIAVCompactRun, PAIAVContractError
 from ...scoring.actor_motion import actor_motion_from_metadata
 from ...scoring.actor_motion import actor_footprint_corners
 from ...compositing.paiav.paiav_io import _nearest_unique_indices, _pose_matrix
@@ -31,7 +29,6 @@ REAR_CAMERAS = ("camera_rear_left_70fov", "camera_rear_right_70fov")
 MODEL_CAMERAS = (("camera_cross_left_120fov", 0), ("camera_front_wide_120fov", 1),
                  ("camera_cross_right_120fov", 2), ("camera_rear_left_70fov", 3),
                  ("camera_rear_right_70fov", 5), ("camera_front_tele_30fov", 6))
-FUTURE_STEPS, FUTURE_INTERVAL_US = 64, 100_000
 # Conservative actor volume around the rig ground plane, sampled on a grid so a
 # box crossing an image edge is caught even when no corner projects inside.
 ACTOR_Z_BELOW_M, ACTOR_Z_ABOVE_M, BOX_SAMPLES = 1.0, 0.5, 5
@@ -82,7 +79,6 @@ def _actor_height(motion: dict) -> float:
 
 
 class PAIAVRun(PAIAVCompactRun):
-    dataset = "pai-av"
     camera_profile = {"camera_names": [name for name, _ in MODEL_CAMERAS],
                       "camera_ids": [index for _, index in MODEL_CAMERAS],
                       "edited_cameras": list(CAMERA_NAMES),
@@ -265,27 +261,3 @@ class PAIAVRun(PAIAVCompactRun):
             raise PAIAVContractError("Inserted actor projects into unedited rear views (" + ", ".join(visible)
                                      + "); excluded because both members show original rear frames")
         return {"rear_visible_point_counts": counts}
-
-    def recorded_future(self, token):
-        """Recorded rear-axle future (64 x/y/yaw poses at 0.1 s) for the memorisation check."""
-        history, _ = self.ego_history(token)
-        members = self.token_sources[token].get("egomotion_members") or {}
-        raw = self._read_zip_parquet(token, "egomotion", members.get("egomotion", f"{token}.egomotion.parquet"))
-        times = int(history["current_timestamp_us"]) + FUTURE_INTERVAL_US * np.arange(FUTURE_STEPS + 1)
-        world_from_rig = _pose_matrices(raw, times)
-        current_from_future = np.linalg.inv(world_from_rig[0])[None] @ world_from_rig[1:]
-        yaw = np.arctan2(current_from_future[:, 1, 0], current_from_future[:, 0, 0])
-        return np.column_stack((current_from_future[:, 0, 3], current_from_future[:, 1, 3], yaw))
-
-    def preflight_report(self):
-        return {**super().preflight_report(), "rear_policy": "archive_decoded_for_both_members",
-                "camera_ids": [index for _, index in MODEL_CAMERAS]}
-
-    def metric_context(self, token):
-        metadata, metadata_path = self.metadata(token)
-        geometry, geometry_source = self.ego_vehicle_geometry(token)
-        return {"actor_motion": actor_motion_from_metadata(metadata, camera_name=None),
-                "vehicle_geometry": geometry, "speed_mps": self.current_speed_mps(token),
-                "longitudinal_acceleration_mps2": self.current_longitudinal_acceleration_mps2(token),
-                "placement_metadata_path": str(metadata_path),
-                "ego_geometry_source": geometry_source, "ego_origin": "rear_axle"}
