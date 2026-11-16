@@ -1,4 +1,4 @@
-"""Alpamayo 2 CoT interventions on ReactPAI (paper section 4.2 and appendix): CoT swap and fixed CoTs.
+"""Alpamayo 2 CoT interventions on ReactPAI (paper section 4.3 and appendix): CoT swap and fixed CoTs.
 
     python -m reactbench.analysis.cot.run_alpamayo2 RUN_DIR --cot-swap     # O/E images x O/E CoTs
     python -m reactbench.analysis.cot.run_alpamayo2 RUN_DIR --fixed-cots   # the five CoTs of fixed_cots.yaml

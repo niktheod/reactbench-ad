@@ -4,7 +4,7 @@
 #   scripts/assets.sh animals ROCKETBOX_ROOT   # the 5 standing Rocketbox animals (unseen objects, section 5)
 #   scripts/assets.sh cars    OPENX_ROOT       # the 7 OpenX vehicles (cars)
 # ROCKETBOX_ROOT: a clone of https://github.com/microsoft/Microsoft-Rocketbox at 0943055 (MIT);
-# OPENX_ROOT: a clone of https://github.com/bounverif/openx-assets at 463ea3d (MPL-2.0 AND CC-BY-4.0).
+# OPENX_ROOT: a clone of https://github.com/vevalabs/openx-assets at 463ea3d (MPL-2.0 AND CC-BY-4.0).
 # Outputs go to <assets>/{rocketbox,rocketbox_standing_animals,openx}/assets (`assets` in configs/paths.yaml).
 # Extra arguments are passed to the builder (e.g. --limit 1 --overwrite).
 set -euo pipefail

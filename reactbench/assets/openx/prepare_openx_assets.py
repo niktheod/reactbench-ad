@@ -40,10 +40,15 @@ DEFAULT_BOUNDS_TOLERANCE_M = 0.01
 GIT_LFS_HEADER = b"version https://git-lfs.github.com/spec/v1"
 BLENDER_RAW_HEADER = b"BLENDER"
 BLENDER_COMPRESSED_HEADERS = (b"\x1f\x8b", b"\x28\xb5\x2f\xfd")
-OPENX_REPOSITORY_URL = "https://github.com/bounverif/openx-assets"
+OPENX_REPOSITORY_URL = "https://github.com/vevalabs/openx-assets"
 DEFAULT_EXCLUDED_ASSET_PATTERNS = (
+    # Nonconforming assets.
     "m1_audi_q7_2015",
     "m1_mercedes_sl65amg_2008",
+    # Not passenger cars (a van and two pickup trucks); the benchmark uses the remaining seven.
+    "n1_fiat_ducato_2014",
+    "n2_gmc_hummer_2021_pickup",
+    "n2_tesla_cybertruck_2024",
 )
 REMOVED_OBJECT_TYPES = {"CAMERA", "LIGHT", "LIGHT_PROBE", "SPEAKER"}
 GEOMETRY_OBJECT_TYPES = {
@@ -107,8 +112,8 @@ def parse_args() -> argparse.Namespace:
         "--include-known-nonconforming",
         action="store_true",
         help=(
-            "Disable the built-in exclusions for known nonconforming OpenX assets. "
-            "Use with --asset for diagnostic validation."
+            "Disable the built-in exclusions (nonconforming assets and vehicles that are not "
+            "passenger cars). Use with --asset for diagnostic validation."
         ),
     )
     parser.add_argument("--limit", type=int, help="Prepare at most this many selected assets.")
@@ -1132,7 +1137,7 @@ def write_attribution(output_dir: Path, destination_root: Path) -> Path:
         "# OpenX vehicle attribution",
         "",
         (
-            "Prepared from [bounverif/openx-assets]"
+            "Prepared from [vevalabs/openx-assets]"
             f"({OPENX_REPOSITORY_URL}). The original XOMA sidecar beside each vehicle is "
             "the authoritative per-asset provenance record."
         ),

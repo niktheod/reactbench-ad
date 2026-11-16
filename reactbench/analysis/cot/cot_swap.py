@@ -1,4 +1,4 @@
-"""CoT swap (paper section 4.2): original/edited images crossed with original/edited CoTs, for both Alpamayo models.
+"""CoT swap (paper section 4.3): original/edited images crossed with original/edited CoTs, for both Alpamayo models.
 
 The natural conditions come from the natural runs (``natural.py``); the crossed ones force the other scene's CoT
 onto an image, with the token's natural seeds: ``original_image_edited_cot`` and ``edited_image_original_cot``,

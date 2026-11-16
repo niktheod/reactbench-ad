@@ -176,7 +176,7 @@ numbers; every runner derives its seeds from the token (`reactbench/models/seeds
 of `"<namespace>:<base seed>:<token>"`). GPU numerics differ slightly between GPU models; the paper's runs used
 NVIDIA A100 and H100 GPUs.
 
-The CoT analysis (section 4.2, appendix) runs on the ReactPAI runs at τ = 2.0 s and reuses the predictions above:
+The CoT analysis (section 4.3, appendix) runs on the ReactPAI runs at τ = 2.0 s and reuses the predictions above:
 
 ```bash
 for model in alpamayo1_5 alpamayo2; do
