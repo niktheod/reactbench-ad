@@ -1,5 +1,6 @@
 """Tables of the training analyses: training stages (section 4.3), fine-tuning on ReactTrain and
-generalization (section 5), the GRPO exploration probe (appendix) and the data statistics."""
+generalization (section 5), the real-scenes control of the released single-frame models and the GRPO
+exploration probe (appendix), and the data statistics."""
 from __future__ import annotations
 
 import json
@@ -19,6 +20,12 @@ STAGES = {"ReCogDrive": (("VLM SFT", "recogdrive_vlm", 84.1), ("IL", "recogdrive
                          ("RL", "recogdrive", 90.8)),
           "SimWAM": (("IL", "simwam_il", 90.3), ("RL", "simwam", 91.9))}
 STAGE_SEED = 20261030
+# Real-scenes runs (``python -m reactbench.models.<model>.real_scenes infer --name NAME``) of the generalization
+# table (section 5) and of the control with the released single-frame models (appendix).
+GENERALIZATION_RUNS = ("recogdrive_il", "recogdrive_il_rt")
+CONTROL_RUNS = ("recogdrive", "drivewam", "simwam")
+# Original-scene plans of IL + RT that are >= 20% shorter (4 s distance) than IL's (section 5).
+SHORTER = 0.8
 # Object names in the ReactTrain sample IDs (<source token>__hazardous_<name>_t<k>).
 PROBE_STRATA = {"crossing_pedestrian": "walking", "standing_pedestrian": "standing", "car": "car"}
 
@@ -116,6 +123,45 @@ def fine_tuning(runs, checkpoints=("recogdrive_il", "recogdrive_il_rt")):
             for name in checkpoints]
 
 
+def plan_motion(poses, interval_s, start_speed_mps):
+    """4 s distance (m) of a plan from the ego origin, and its largest deceleration (m/s^2): mean speed per
+    interval from the waypoints, decelerations between consecutive intervals and from the measured start speed."""
+    xy = np.asarray(poses, dtype=float)[:int(round(4.0 / interval_s)), :2]
+    steps = np.linalg.norm(np.diff(np.vstack([[0.0, 0.0], xy]), axis=0), axis=1)
+    speeds = steps / interval_s
+    centres = np.concatenate(([interval_s / 2], np.full(len(speeds) - 1, interval_s)))  # interval centres
+    return float(steps.sum()), float(max((-np.diff(np.concatenate(([start_speed_mps], speeds))) / centres).max(), 0.))
+
+
+def original_plan_shortening(runs, checkpoints=("recogdrive_il", "recogdrive_il_rt")):
+    """Original ReactNAV scenes: share of scenes whose IL + RT plan covers >= 20% less distance in 4 s than IL's,
+    and each checkpoint's largest deceleration. Needs the original predictions (not part of the released
+    scores); None without them. Shares are given on all scenes and without the scenes whose logged future has
+    irregular timestamps (``timestamp_warning``); the paper's 0.9% is the latter."""
+    folders = [runs.directory(name, "reactnav") / "original" / "trajectories" for name in checkpoints]
+    run = runs.insertion_runs(checkpoints[0], "reactnav").get(("car", TAUS_S[0]))
+    if run is None or not all(folder.is_dir() for folder in folders):
+        return None
+    rows = [r for r in runs.rows(run, "reactnav") if r.get("status") == "scored"]
+    tokens = sorted({r["token"] for r in rows})
+    start = {r["token"]: float(r["groups"]["speed_mps"]) for r in rows}
+    warned = {r["token"] for r in rows if r.get("timestamp_warning")}
+    motion = {}
+    for name, folder in zip(checkpoints, folders):
+        for token in tokens:
+            with np.load(folder / f"{token}.npz") as archive:
+                motion[name, token] = plan_motion(archive["trajectory"], float(archive["interval_length_s"]),
+                                                  start[token])
+    il, rt = checkpoints
+    shorter = {t for t in tokens if motion[rt, t][0] <= SHORTER * motion[il, t][0]}
+    kept = [t for t in tokens if t not in warned]
+    return {"checkpoints": list(checkpoints), "n": len(tokens), "shorter_n": len(shorter),
+            "shorter_pct": 100. * len(shorter) / len(tokens),
+            "n_without_timestamp_warning": len(kept), "shorter_n_without_timestamp_warning": len(shorter & set(kept)),
+            "shorter_pct_without_timestamp_warning": 100. * len(shorter & set(kept)) / len(kept),
+            "max_deceleration_mps2": {name: max(motion[name, t][1] for t in tokens) for name in checkpoints}}
+
+
 def unseen_objects(runs, checkpoints=("recogdrive_il", "recogdrive_il_rt")):
     """Standing animals: mean over tau on the tokens present in every animal run of every checkpoint."""
     token_sets = []
@@ -130,14 +176,35 @@ def unseen_objects(runs, checkpoints=("recogdrive_il", "recogdrive_il_rt")):
              **_mean_over_runs(runs, name, ("standing_animal",), tokens=common)} for name in checkpoints]
 
 
-def real_scenes(summary_path=None):
-    """Real scenes: P and CS with the target frozen, mean over the four headways."""
+def _real_scene_summary(summary_path=None):
     path = Path(summary_path or paths.outputs("real_scenes", "summary", "navtest_v2", "summary.json"))
-    if not path.is_file():
+    return json.loads(path.read_text()) if path.is_file() else None
+
+
+def real_scenes(summary_path=None, names=GENERALIZATION_RUNS):
+    """Real scenes: P and CS with the target frozen, mean over the four headways."""
+    value = _real_scene_summary(summary_path)
+    if value is None:
         return []
-    value = json.loads(path.read_text())
-    return [{"checkpoint": name, "p_pct": m["p_frozen"], "cs_kmh": m["cs_kmh_frozen"]}
-            for name, m in value["mean_over_headways"].items()]
+    return [{"checkpoint": name, "p_pct": value["mean_over_headways"][name]["p_frozen"],
+             "cs_kmh": value["mean_over_headways"][name]["cs_kmh_frozen"]}
+            for name in names if name in value["mean_over_headways"]]
+
+
+def real_scene_control(summary_path=None, names=CONTROL_RUNS):
+    """Real scenes, released single-frame models: P (target frozen) per headway and its mean."""
+    value = _real_scene_summary(summary_path)
+    if value is None:
+        return []
+    records = []
+    for name in names:
+        if name not in value["summary"]:
+            continue
+        per_headway = value["summary"][name]
+        records.append({"model": name, "n": next(iter(per_headway.values()))["n"],
+                        "p_pct": {h: v["p_frozen"] for h, v in per_headway.items()},
+                        "mean_p_pct": value["mean_over_headways"][name]["p_frozen"]})
+    return records
 
 
 def exploration_probe(path=None):

@@ -30,8 +30,8 @@ from .runs import parse_run_name
 from .scoring.rows import read_rows
 from .summarize.runs import DATASETS, Runs
 
-MODELS = ("alpamayo1_5", "alpamayo2", "autovla", "recogdrive", "recogdrive_vlm", "recogdrive_il", "recogdrive_il_rt",
-          "drivewam", "simwam", "simwam_il")
+MODELS = ("alpamayo1_5", "alpamayo2", "autovla", "autovla_l0r0", "recogdrive", "recogdrive_vlm", "recogdrive_il",
+          "recogdrive_il_rt", "drivewam", "simwam", "simwam_il")
 
 
 MACHINE_KEYS = ("source_documents", "config", "data_config", "backend_provenance", "result_dir", "run_dir",

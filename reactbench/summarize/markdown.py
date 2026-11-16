@@ -76,6 +76,32 @@ def tir_table(records):
     return "\n".join(lines)
 
 
+def side_camera_table(data):
+    """AutoVLA with CAM_L1/R1 or CAM_L0/R0 as its front-left/right views: dP and dCS per run, TIR pooled over tau."""
+    if not data:
+        return ""
+    from .benchmark import SIDE_CAMERA_MODELS
+    cells = data["cells"]
+    keys = sorted({(r["object"], r["tau_s"]) for r in cells}, key=lambda k: (OBJECTS.index(k[0]), k[1]))
+    lines = ["### AutoVLA side cameras on ReactNAV: ΔP (pp), ΔCS (km/h), TIR at ε = 0.05 m (%, pooled over τ)", "",
+             "| Side cameras | Metric | " + " | ".join(f"{_object(o)} τ={t:g}" for o, t in keys) + " |",
+             "|---|---|" + "---:|" * len(keys)]
+    for model, label in SIDE_CAMERA_MODELS.items():
+        for metric, value, interval in (("ΔP", "delta_p_pp", "delta_p_ci95_pp"),
+                                        ("ΔCS", "delta_cs_kmh", "delta_cs_ci95_kmh")):
+            row = []
+            for key in keys:
+                match = [r for r in cells if (r["model"], r["object"], r["tau_s"]) == (model, *key)]
+                row.append(_f(match[0][value]) + _gray(match[0][interval]) if match else "–")
+            lines.append(f"| {label if metric == 'ΔP' else ''} | {metric} | " + " | ".join(row) + " |")
+        # TIR is pooled over tau: one value per object, in its first tau column.
+        tir = {r["object"]: r["tir_0.05_pct"] for r in data["tir"] if r["model"] == model}
+        first = {o: min(t for oo, t in keys if oo == o) for o, _ in keys}
+        lines.append("|  | TIR | " + " | ".join(f"{tir[o]:.1f}" if o in tir and t == first[o] else ""
+                                                for o, t in keys) + " |")
+    return "\n".join(lines)
+
+
 def training_stages_table(records):
     """dP below 20 km/h at tau = 2.0 s; '*' = CI of the change from the previous stage includes zero."""
     if not records:
@@ -104,7 +130,7 @@ NAVTEST_COLUMNS = (("no_at_fault_collisions", "NC"), ("drivable_area_compliance"
                    ("score", "PDMS"))
 
 
-def fine_tuning_table(records):
+def fine_tuning_table(records, shortening=None):
     if not records:
         return ""
     lines = ["### Fine-tuning on ReactTrain: ReactNAV (mean over the 12 runs) and navtest", "",
@@ -115,6 +141,15 @@ def fine_tuning_table(records):
         lines.append(f"| {LABELS.get(r['checkpoint'], r['checkpoint'])} | {_f(r['delta_p_pp'], 1)} | "
                      f"{_f(r['delta_cs_kmh'], 1)} | "
                      + " | ".join(_f(navtest.get(key), 1, signed=False) for key, _ in NAVTEST_COLUMNS) + " |")
+    if shortening:
+        s = shortening
+        il, rt = (LABELS.get(name, name) for name in s["checkpoints"])
+        decel = ", ".join(f"{LABELS.get(k, k)} {v:.2f}" for k, v in s["max_deceleration_mps2"].items())
+        lines += ["", f"Original ReactNAV scenes: {rt} plans at least 20% less distance (4 s) than {il} in "
+                      f"{s['shorter_pct']:.1f}% ({s['shorter_n']}/{s['n']}) of the samples, "
+                      f"{s['shorter_pct_without_timestamp_warning']:.1f}% "
+                      f"({s['shorter_n_without_timestamp_warning']}/{s['n_without_timestamp_warning']}) without the "
+                      f"scenes with irregular logged timestamps; largest deceleration (m/s²): {decel}."]
     return "\n".join(lines)
 
 
@@ -134,6 +169,21 @@ def generalization_table(unseen, real):
     if unseen:
         lines.append("")
         lines.append(f"Unseen objects: {next(iter(unseen.values()))['n_tokens']} scenes common to every animal run.")
+    return "\n".join(lines)
+
+
+def real_scene_control_table(records):
+    """Released single-frame models on the real scenes (stationary vehicle ahead): P (%) per tau and the mean."""
+    if not records:
+        return ""
+    headways = list(records[0]["p_pct"])
+    lines = [f"### Real scenes with a stationary vehicle ahead (n = {records[0]['n']}): P (%) by τ", "",
+             "| Model | " + " | ".join(f"τ={float(h):g}" for h in headways) + " | Mean |",
+             "|---|" + "---:|" * (len(headways) + 1)]
+    for r in records:
+        lines.append(f"| {LABELS.get(r['model'], r['model'])} | "
+                     + " | ".join(_f(r["p_pct"][h], 1, signed=False) for h in headways)
+                     + f" | {_f(r['mean_p_pct'], 1, signed=False)} |")
     return "\n".join(lines)
 
 
@@ -223,10 +273,4 @@ def knockout_table(summary):
     for metric, label in KNOCKOUT_LABELS.items():
         lines.append(f"| {label} | " + " | ".join(cell(summary["models"][m]["metrics"][metric]) for m in models)
                      + f" | {cell(summary['difference'][metric], signed=True)} |")
-    # Knockout ADE by the content of the natural CoT (appendix text).
-    for name, label in (("slow_keyword", "CoT asks to slow down, stop, yield, brake or decelerate"),
-                        ("other", "Other CoTs")):
-        groups = [summary["models"][m]["ade_knockout_by_cot"][name] for m in models]
-        cells = [f"{_f(g['mean'], signed=False)} (n = {g['samples']})" for g in groups]
-        lines.append(f"| ADE KO, {label} | " + " | ".join(cells) + " | |")
     return "\n".join(lines)

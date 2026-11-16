@@ -16,6 +16,10 @@ metric_horizon_s: 4.0
 # both original and edited generation, so each pair shares its sampling randomness.
 generation_seed_base: 42
 
+# Front-left/right views: CAM_L1/R1, as AutoVLA's released code reads them on NAVSIM (not rendered, so original
+# in both scenes). l0r0.yaml uses the rendered CAM_L0/R0 instead (appendix).
+side_cameras: l1r1
+
 lora_conf:
   use_lora: false
   task_type: CAUSAL_LM

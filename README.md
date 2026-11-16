@@ -1,6 +1,6 @@
 # ReactBench
 
-**<Paper title>** · <Authors> · [Paper](<arXiv link>) · [Project page](<project page>)
+**ReactBench-AD: Do Driving VLAs and World-Action Models React to Imminent Hazards in Their Path?** · <Authors> · [Paper](<arXiv link>) · [Project page](<project page>)
 
 ReactBench measures how driving models react to objects that appear in their path. It edits real NAVSIM
 (**ReactNAV**, 3,228 navtest scenes) and PhysicalAI-Autonomous-Vehicles (**ReactPAI**, 1,045 clips) samples:
@@ -13,11 +13,11 @@ original and on the edited scene of each sample, and both predictions are scored
 
 | ReactNAV | Cross. τ=0.5 | 1.0 | 1.5 | 2.0 | Stand. τ=0.5 | 1.0 | 1.5 | 2.0 | Car τ=0.5 | 1.0 | 1.5 | 2.0 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Alpamayo 1.5 | +0.25 | +3.10 | +7.16 | +8.71 | +0.09* | +3.66 | +11.93 | +17.62 | +0.12 | +3.84 | +15.93 | +28.80 |
-| Alpamayo 2 | +0.06* | +2.11 | +6.76 | +8.37 | +0.03* | +3.25 | +9.39 | +12.34 | +0.12 | +5.36 | +19.40 | +22.44 |
-| AutoVLA | +0.00* | +0.00* | +0.06* | +0.06* | +0.00* | -0.03* | +0.03* | +0.28* | +0.03* | +0.56 | +1.67 | +2.20 |
+| Alpamayo 1.5 | +0.25 | +3.10 | +7.16 | +8.71 | +0.09* | +3.66 | +11.93 | +17.63 | +0.12 | +3.84 | +15.92 | +28.81 |
+| Alpamayo 2 | +0.06* | +2.11 | +6.75 | +8.36 | +0.03* | +3.25 | +9.42 | +12.33 | +0.12 | +5.36 | +19.39 | +22.43 |
+| AutoVLA | +0.00* | -0.03* | +0.53 | +0.90 | +0.00* | +0.16 | +0.34 | +0.96 | +0.03* | +0.87 | +2.14 | +3.26 |
 | ReCogDrive | +0.00* | -0.03* | +0.22 | +0.40 | +0.00* | +0.00* | +0.12 | +0.40 | +0.00* | +0.00* | +0.28 | +1.89 |
-| DriveWAM | +0.00* | +0.06* | +0.12 | +0.09* | +0.00* | +0.12 | +0.56 | +2.08 | +0.00* | +1.77 | +3.63 | +5.61 |
+| DriveWAM | +0.00* | +0.06* | +0.12 | +0.09* | +0.00* | +0.12 | +0.56 | +2.08 | +0.00* | +1.77 | +3.62 | +5.61 |
 | SimWAM | +0.00* | +0.06* | +0.12 | +0.22 | +0.00* | +0.00* | +0.15 | +0.71 | +0.00* | +0.06* | +0.99 | +2.26 |
 | **ReactPAI** | | | | | | | | | | | | |
 | Alpamayo 1.5 | +0.10* | +5.55 | +25.17 | +35.12 | +0.19* | +5.07 | +21.63 | +35.69 | +0.67 | +12.92 | +20.86 | +25.65 |
@@ -111,13 +111,15 @@ both predictions collide, and TIR the share of samples whose two predictions dif
 
 with the per-sample scores of every run (`<release link: scores>`) unpacked at `/abs/path/to/scores` (a relative
 `REACTBENCH_OUTPUTS` resolves against the repository root). It prints and writes to `<scores>/summaries/` the
-tables `main` (main and detailed results), `tir`, `training_stages`, `fine_tuning` (ReactNAV and navtest PDMS),
-`generalization` (unseen objects, real scenes), `speed_distribution`, `feasibility` (τ = 0.5 s, unavoidable
-samples), `cot` (CoT swap, fixed CoTs), `knockout` and `exploration_probe`; select some with `--tables`.
+tables `main` (main and detailed results), `tir`, `side_cameras` (AutoVLA with CAM_L1/R1 or CAM_L0/R0),
+`training_stages`, `fine_tuning` (ReactNAV and navtest PDMS), `generalization` (unseen objects, real scenes),
+`real_scene_control` (ReCogDrive, DriveWAM and SimWAM on the real scenes), `speed_distribution`, `feasibility`
+(τ = 0.5 s, unavoidable samples), `cot` (CoT swap, fixed CoTs), `knockout` and `exploration_probe`; select some
+with `--tables`. Every cell uses the model's own valid original/edited pairs.
 `--tir-curves` and `--by-speed` also write the data of the TIR and ΔP-by-speed figures as CSV. All intervals are
-95% percentile bootstrap intervals over scenes with 10,000 resamples. The released scores contain no CoT texts, so
-the CoT summary figure needs the model outputs (`python -m reactbench.analysis.cot.summary` after re-running the
-Alpamayo models).
+95% percentile bootstrap intervals over scenes with 10,000 resamples. The released scores contain no CoT texts or trajectories, so
+the CoT summary figure (`python -m reactbench.analysis.cot.summary`) and the original-scene plan comparison of IL
+and IL + RT (section 5, printed under `fine_tuning`) need the model outputs.
 
 ### Setup for running the models and the benchmark construction
 
@@ -164,10 +166,13 @@ done
 ```
 
 Each runs in its model's environment. `--config` selects a configuration (ReCogDrive: `rl` (default), `il`,
-`vlm_sft`, `il_rt`; SimWAM: `rl` (default), `il`): the training-stage and fine-tuning tables use the other ones, each
-with its own `--original` pass. `--max-samples N` runs a smoke test, `--overwrite` replaces an existing output.
+`vlm_sft`, `il_rt`; SimWAM: `rl` (default), `il`; AutoVLA: `config` (default), `l0r0`): the training-stage,
+fine-tuning and side-camera tables use the other ones, each with its own `--original` pass. `--max-samples N` runs a smoke test, `--overwrite` replaces an existing output.
 AutoVLA reads its own preprocessed navtest samples (`autovla_inputs`: AutoVLA's `run_nuplan_preprocessing.sh` on
-navtest, without CoT). `reactbench/models/runner.py` holds what the runners share; `models/drivewam/eval.py` is the
+navtest, without CoT). As in AutoVLA's released code, its front-left and front-right views are CAM_L1/R1, which are
+not rendered: they stay original, and the runner skips the 1, 4 and 9 crossing-pedestrian samples (τ = 1.0, 1.5,
+2.0 s) whose pedestrian would enter them (`data/reactnav/autovla_side_camera_fov.json`). `--config l0r0`
+(`autovla_l0r0`) feeds the rendered CAM_L0/R0 instead, on every sample (appendix). `reactbench/models/runner.py` holds what the runners share; `models/drivewam/eval.py` is the
 shortest example of a runner. **Paired seeds:** the original and the edited scene of a pair share all random
 numbers; every runner derives its seeds from the token (`reactbench/models/seeds.py`: the first 63 bits of SHA-256
 of `"<namespace>:<base seed>:<token>"`). GPU numerics differ slightly between GPU models; the paper's runs used
@@ -215,6 +220,11 @@ with `--config il` and `il_rt`. Real scenes (`data/real_scenes/navtest_v2.json`;
 
     python -m reactbench.models.recogdrive.real_scenes infer --name recogdrive_il --config il
     python -m reactbench.models.recogdrive.real_scenes infer --name recogdrive_il_rt --config il_rt
+    # appendix control: the released single-frame models (SimWAM and DriveWAM in their own environments)
+    python -m reactbench.models.recogdrive.real_scenes infer --name recogdrive --config rl
+    python -m reactbench.models.recogdrive.real_scenes annotations
+    python -m reactbench.models.simwam.real_scenes infer --name simwam
+    python -m reactbench.models.drivewam.real_scenes infer --name drivewam
     python -m reactbench.models.recogdrive.real_scenes summarize
 
 **GRPO exploration probe** (appendix): `python -m reactbench.analysis.exploration_probe` (after `view.sh`).
@@ -237,8 +247,9 @@ for k in 5 10 15 20; do                                # ReactPAI: tau = k x 0.1
 done
 ```
 
-The scenes and crossing sides are fixed by `data/`: ReactNAV is the 3,228 navtest scenes at 5-40 km/h in which all
-three objects can be placed at every look-ahead time and every run rendered successfully; the selection scripts are
+The scenes and crossing sides are fixed by `data/`: ReactNAV is the 3,228 navtest scenes with an ego speed of at
+least 5 km/h (all end up at 5-40 km/h) in which all three objects can be placed at every look-ahead time and every
+run rendered successfully; the selection scripts are
 not released. The ReactPAI clips are listed in `data/reactpai/selection_manifest.json`.
 
 ### Unavoidable collisions and tests
@@ -256,13 +267,13 @@ real-scenes selection.
 | `reactbench/datasets/` | ReactNAV (`reactnav.py`: link/pack) and ReactPAI (`paiav.py`, `download_reactpai.py`) data, NAVSIM annotations |
 | `reactbench/scoring/` | At-fault scoring of ReactNAV and ReactPAI (`python -m reactbench.scoring`), braking feasibility |
 | `reactbench/summarize/` | All tables (`python -m reactbench.summarize`); `reactbench/export.py` writes the released scores |
-| `reactbench/models/` | Runners: Alpamayo 1.5, Alpamayo 2, AutoVLA, ReCogDrive (+ real scenes), DriveWAM, SimWAM |
+| `reactbench/models/` | Runners: Alpamayo 1.5, Alpamayo 2, AutoVLA, ReCogDrive, DriveWAM, SimWAM (the last three also on the real scenes) |
 | `reactbench/analysis/` | CoT swap and fixed CoTs, CoT summary, attention knockout, GRPO exploration probe |
 | `reactbench/compositing/` | NAVSIM and PAI-AV compositors (Blender), PCTNet harmonization (libcom 0.1.7) |
 | `reactbench/assets/`, `reactbench/selection/` | Builders of the inserted objects; real-scenes selection, ReactTrain intersection |
 | `third_party/` | Modified ReCogDrive with its NAVSIM devkit; `setup.sh` and `patches/` for the other models |
-| `data/` | Scene and clip lists, crossing and benign sides, real-scenes scenes, knockout clips |
-| `scripts/`, `envs/`, `configs/`, `tests/` | Launchers, environments, `paths.example.yaml`, unit tests of scoring and selection |
+| `data/` | Scene and clip lists, crossing and benign sides, AutoVLA's side-camera exclusions, real-scenes scenes, knockout clips |
+| `scripts/`, `envs/`, `configs/`, `tests/` | Launchers, environments, `paths.example.yaml`, unit tests |
 
 ## Citation
 

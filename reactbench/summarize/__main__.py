@@ -5,10 +5,11 @@
     python -m reactbench.summarize --tir-curves --by-speed
     python -m reactbench.summarize --models alpamayo1_5 mymodel --tables main tir   # your model, scored runs
 
-Tables: main (main and detailed results), tir (trajectory invariance rate), training_stages,
-fine_tuning (ReactNAV and navtest), generalization (unseen objects, real scenes),
-speed_distribution, feasibility (tau = 0.5 s, unavoidable samples), cot (CoT swap, fixed CoTs),
-knockout (attention knockout) and exploration_probe.
+Tables: main (main and detailed results), tir (trajectory invariance rate), side_cameras (AutoVLA with
+CAM_L1/R1 or CAM_L0/R0), training_stages, fine_tuning (ReactNAV and navtest), generalization (unseen objects,
+real scenes), real_scene_control (released single-frame models on the real scenes), speed_distribution,
+feasibility (tau = 0.5 s, unavoidable samples), cot (CoT swap, fixed CoTs), knockout (attention knockout) and
+exploration_probe.
 
 Scored runs are found under ``<outputs>/predictions/<model>/<dataset>/`` (see ``runs.py``);
 ``--runs MODEL:DATASET=DIR`` overrides one location. ``--models`` selects the models of the benchmark tables
@@ -29,8 +30,8 @@ from ..io import read_json, write_json
 from . import benchmark, cot, feasibility, markdown, training
 from .runs import DATASETS, MODELS, Runs
 
-TABLES = ("main", "tir", "training_stages", "fine_tuning", "generalization", "speed_distribution",
-          "feasibility", "cot", "knockout", "exploration_probe")
+TABLES = ("main", "tir", "side_cameras", "training_stages", "fine_tuning", "generalization", "real_scene_control",
+          "speed_distribution", "feasibility", "cot", "knockout", "exploration_probe")
 
 
 def write_csv(path, records):
@@ -67,6 +68,13 @@ def benchmark_tables(runs, args, output):
             text.append(markdown.tir_table(records))
             if args.tir_curves:
                 write_csv(output / f"tir_curves_{dataset}.csv", curves)
+        if "side_cameras" in args.tables and dataset == "reactnav":
+            data = benchmark.side_cameras(runs)
+            if data:
+                write_json(output / "side_cameras.json", data)
+                text.append(markdown.side_camera_table(data))
+            else:
+                _skip("side_cameras", "needs the scored autovla and autovla_l0r0 runs")
         if args.by_speed:
             write_csv(output / f"delta_p_by_speed_{dataset}.csv", benchmark.by_speed(runs, dataset, models))
         if "feasibility" in args.tables:
@@ -92,8 +100,11 @@ def other_tables(runs, args, output):
         except FileNotFoundError as error:
             _skip("fine_tuning", str(error))
         else:
+            shortening = training.original_plan_shortening(runs)
             write_json(output / "fine_tuning.json", records)
-            text.append(markdown.fine_tuning_table(records))
+            if shortening:
+                write_json(output / "fine_tuning_original_plans.json", shortening)
+            text.append(markdown.fine_tuning_table(records, shortening))
     if "generalization" in args.tables:
         try:
             unseen = training.unseen_objects(runs)
@@ -103,6 +114,10 @@ def other_tables(runs, args, output):
         real = training.real_scenes()
         write_json(output / "generalization.json", {"unseen_objects": unseen, "real_scenes": real})
         text.append(markdown.generalization_table(unseen, real))
+    if "real_scene_control" in args.tables:
+        records = training.real_scene_control()
+        write_json(output / "real_scene_control.json", records)
+        text.append(markdown.real_scene_control_table(records))
     if "speed_distribution" in args.tables:
         counts = {}
         for dataset in args.datasets:

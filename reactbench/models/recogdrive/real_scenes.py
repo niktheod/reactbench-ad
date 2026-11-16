@@ -13,6 +13,10 @@ target). These scenes have no unedited counterpart, so the paper reports levels,
     python -m reactbench.models.recogdrive.real_scenes infer --name recogdrive_il_rt --config il_rt
     python -m reactbench.models.recogdrive.real_scenes summarize
 
+The released single-frame models (appendix control): ``infer --name recogdrive --config rl`` and, after
+``annotations`` (the scenes' real ego records, in this environment), ``python -m
+reactbench.models.simwam.real_scenes infer`` and ``python -m reactbench.models.drivewam.real_scenes infer``.
+
 ``build`` reads the navtest metric cache (``navsim_metric_cache``, NAVSIM v2) and writes the scene file.
 Outputs live under ``<outputs>/real_scenes/``.
 """
@@ -187,14 +191,23 @@ def injected_annotation(annotation, headway):
         record[key] = value.tolist()
     return record
 
-def planner_state(model_shapes, checkpoint_state, prefix="action_head."):
+# The motion-dropout null states of the modified planner (third_party/recogdrive): zero buffers, unused at inference,
+# and absent from the released upstream checkpoints (IL, RL), as in ``planner_state_from_checkpoint``.
+OPTIONAL_PLANNER_STATE = ("action_head.null_motion_hidden", "action_head.null_history")
+
+
+def planner_state(model_state, checkpoint_state, prefix="action_head."):
     """Checkpoint tensors for every planner weight; a missing or reshaped weight is an error.
 
     The upstream agent's initialize() silently skips mismatched names/shapes, so an incompatible
-    checkpoint would otherwise run with part of the IL planner.
+    checkpoint would otherwise run with part of the IL planner. ``model_state``: the planner's own state
+    (``action_head.``-prefixed), which supplies the optional null states a checkpoint lacks.
     """
     stripped = {(k[len("agent."):] if k.startswith("agent.") else k): v for k, v in checkpoint_state.items()}
-    expected = {k: tuple(shape) for k, shape in model_shapes.items() if k.startswith(prefix)}
+    for key in OPTIONAL_PLANNER_STATE:
+        if key in model_state and key not in stripped:
+            stripped[key] = model_state[key]
+    expected = {k: tuple(v.shape) for k, v in model_state.items() if k.startswith(prefix)}
     missing = sorted(k for k in expected if k not in stripped)
     reshaped = sorted(k for k in expected if k in stripped and tuple(stripped[k].shape) != expected[k])
     if not expected or missing or reshaped:
@@ -383,6 +396,36 @@ def build(args):
 
 # --- infer ------------------------------------------------------------------------------------------
 
+def annotations_path(scenes_path):
+    return ROOT / "annotations" / f"{Path(scenes_path).stem}.json"
+
+
+def scene_annotations(scenes, source):
+    """The real annotation records of the scenes: the ``annotations`` file of this scene file, else built."""
+    path = annotations_path(source["path"])
+    if not path.is_file():
+        return build_annotations(scenes)
+    value = json.loads(path.read_text())
+    if value["scenes"]["sha256"] != source["sha256"]:
+        raise ValueError(f"{path} was built from another scene file")
+    missing = sorted(scene["token"] for scene in scenes if scene["token"] not in value["records"])
+    if missing:
+        raise ValueError(f"{path} lacks {len(missing)} scenes, e.g. {missing[:3]}")
+    return value["records"]
+
+
+def write_annotations(args):
+    """Real annotation records of a scene file, for the runners whose environment lacks the NAVSIM devkit."""
+    scenes, sources, _ = load_scenes([args.scenes])
+    output = annotations_path(args.scenes)
+    if output.exists():
+        raise FileExistsError(f"{output} exists")
+    records = build_annotations(scenes)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps({"scenes": sources[0], "records": records}) + "\n")
+    print(f"Wrote {len(records)} records to {output}", flush=True)
+
+
 def build_annotations(scenes):
     """Real annotation records exactly as reactbench.datasets.navsim_annotations writes them."""
     from navsim.common.dataclasses import SceneFilter
@@ -414,13 +457,13 @@ def infer(args):
     checkpoints = parse_checkpoints(args.checkpoint or [f"{args.name}={cfg['checkpoint_path']}"])
     scenes, sources, conditions = load_scenes([args.scenes])
     seed_base = int(cfg.get("diffusion_seed_base", 42))
-    annotations = build_annotations(scenes)
+    annotations = scene_annotations(scenes, sources[0])
     agent = instantiate(evaluation.agent_config(cfg))
     agent.initialize()
-    shapes = {f"action_head.{k}": tuple(v.shape) for k, v in agent.action_head.state_dict().items()}
+    model_state = {f"action_head.{k}": v.clone() for k, v in agent.action_head.state_dict().items()}
     predictions, provenance = {}, {}
     for name, path in checkpoints.items():
-        state = planner_state(shapes, torch.load(path, map_location="cpu", weights_only=False)["state_dict"])
+        state = planner_state(model_state, torch.load(path, map_location="cpu", weights_only=False)["state_dict"])
         agent.action_head.load_state_dict({k[len("action_head."):]: v for k, v in state.items()}, strict=True)
         provenance[name] = {"path": str(path), "sha256": file_digest(path), "planner_weights": len(state)}
         print(f"{name}: loaded all {len(state)} planner weights from {path}", flush=True)
@@ -547,6 +590,9 @@ def main(argv=None):
     p.add_argument("--metric-cache", type=Path, help="Default: navsim_metric_cache in configs/paths.yaml")
     p.add_argument("--work-root", type=Path, help="Scoring work root that receives the lane sidecars")
     p.set_defaults(function=build)
+    p = sub.add_parser("annotations", help="Real ego records of a scene file (CPU; for SimWAM and DriveWAM)")
+    p.add_argument("--scenes", type=Path, default=default_scenes())
+    p.set_defaults(function=write_annotations)
     p = sub.add_parser("infer", help="Run a ReCogDrive checkpoint on a scene file (GPU), then score")
     p.add_argument("--scenes", type=Path, default=default_scenes())
     p.add_argument("--name", required=True, help="Run name, e.g. il or il_rt")

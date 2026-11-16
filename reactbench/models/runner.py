@@ -244,6 +244,10 @@ class Runner:
         """Reject an edited sample the model cannot be shown consistently; return record fields."""
         return {}
 
+    def excluded_tokens(self) -> dict[str, str]:
+        """{token: reason} of the edited run's samples this model is not evaluated on (not failures)."""
+        return {}
+
     def summary_extras(self) -> dict[str, Any]:
         return {}
 
@@ -286,6 +290,9 @@ class Runner:
             self.loader = loader
             tokens = select_tokens(loader.tokens, tokens_file=args.tokens_file, max_samples=args.max_samples)
             self.setup()
+            self.excluded_inputs = {} if self.original else {
+                token: reason for token, reason in self.excluded_tokens().items() if token in tokens}
+            tokens = [token for token in tokens if token not in self.excluded_inputs]
             signature = self.signature()
             # Per-token provenance of the original inputs, where the loader records it (ReactPAI, SimWAM, Alpamayo 2).
             failures, contracts, eligible = [], {}, list(tokens)
@@ -360,7 +367,8 @@ class Runner:
             "selected_token_count": len(tokens), "successful_inference_count": len(successful),
             "successful_pair_count": 0 if self.original else len(records),
             "failed_sample_count": len({row["token"] for row in failures}),
-            "excluded_original_tokens": excluded, "gpus": gpu_names(), **self.summary_extras()})
+            "excluded_original_tokens": excluded, "excluded_input_tokens": self.excluded_inputs,
+            "gpus": gpu_names(), **self.summary_extras()})
         save_json(self.result_dir / "metrics" / "summary.json", summary)
         save_manifest(self.result_dir, mode=summary["mode"], signature=signature, source_run_dir=self.run_dir,
                       selected_tokens=tokens, successful_tokens=successful, source_contracts=contracts)

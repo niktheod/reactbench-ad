@@ -1,9 +1,9 @@
 """ReactBench tables: main/detailed results, trajectory invariance rate (TIR) and dP by ego speed.
 
-Values of the main table use, per (object, tau), the scenes for which every evaluated model has a
-valid original/edited pair (common cohort). Its intervals, which decide the gray "CI includes zero"
-marks, resample each model's own valid pairs. All intervals: 95% percentile bootstrap over scenes,
-10,000 resamples.
+Every value and interval of the main table uses the model's own valid original/edited pairs, so a sample one
+model fails or skips (AutoVLA's invalid generations and side-camera exclusions) leaves the other models' cells
+unchanged. Intervals decide the gray "CI includes zero" marks. All intervals: 95% percentile bootstrap over
+scenes, 10,000 resamples.
 """
 from __future__ import annotations
 
@@ -80,10 +80,8 @@ def main_table(runs, dataset, models=None):
             settings.setdefault((obj, tau), {})[model] = (rows, indexed)
     records = []
     for (obj, tau), by_model in sorted(settings.items(), key=lambda item: (OBJECTS.index(item[0][0]), item[0][1])):
-        available = [set(indexed) for _, indexed in by_model.values() if indexed]
-        common = set.intersection(*available) if available else set()
         for model, (rows, indexed) in by_model.items():
-            selected = [indexed[k] for k in sorted(common) if k in indexed]
+            selected = [indexed[k] for k in sorted(indexed)]
             stat = comparison_summary(selected, metric)
             primary, inserted, contact = stat["primary"], stat["nc_inserted"], stat["contact_speed"]
             own = own_pairs(rows, dataset)
@@ -103,7 +101,7 @@ def main_table(runs, dataset, models=None):
                 "delta_cs_ci95_kmh": bootstrap_mean(own["contact_delta_kmh"]),
                 "paired_n": stat["paired_count"], "contact_n": contact["count"],
                 "own_paired_n": len(own["keys"]), "own_contact_n": len(own["contact_delta_kmh"]),
-                "invalid_pair_n": len(rows) - len(indexed), "unmatched_pair_n": len(indexed) - len(selected)})
+                "invalid_pair_n": len(rows) - len(indexed)})
     return records
 
 
@@ -134,6 +132,18 @@ def tir(runs, dataset, models=None, *, curves=False):
                     curve_rows.append({"dataset": dataset, "model": model, "object": obj, "epsilon_m": float(xi),
                                        "tir_pct": float(pct)})
     return records, curve_rows
+
+
+# AutoVLA's front-left/right views (appendix): CAM_L1/R1 as in its released code (the main results) or CAM_L0/R0.
+SIDE_CAMERA_MODELS = {"autovla": "CAM_L1/R1", "autovla_l0r0": "CAM_L0/R0"}
+
+
+def side_cameras(runs):
+    """ReactNAV main-table cells and TIR of AutoVLA under both side-camera setups ({} unless both are scored)."""
+    models = [m for m in SIDE_CAMERA_MODELS if runs.insertion_runs(m, "reactnav")]
+    if len(models) < len(SIDE_CAMERA_MODELS):
+        return {}
+    return {"cells": main_table(runs, "reactnav", models), "tir": tir(runs, "reactnav", models)[0]}
 
 
 def by_speed(runs, dataset, models=None, *, min_bin_count=10):

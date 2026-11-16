@@ -1,0 +1,33 @@
+{
+ "description": "ReactNAV samples excluded for AutoVLA in its released camera setup: AutoVLA's front-left and front-right inputs are CAM_L1/R1, which the compositor does not render (they stay original), and in these samples the inserted object would enter their field of view in at least one history frame. Only crossing pedestrians do; every other run keeps all 3,228 samples.",
+ "cameras": [
+  "CAM_L1",
+  "CAM_R1"
+ ],
+ "margins_m": {
+  "horizontal": 0.3,
+  "vertical": 0.2
+ },
+ "runs": {
+  "crossing_pedestrian_timestep_2": [
+   "3ebe88aecd0c5d20"
+  ],
+  "crossing_pedestrian_timestep_3": [
+   "3ebe88aecd0c5d20",
+   "cbf41000a2105ca1",
+   "debb1dafdd77545e",
+   "f71e5dcd9df85d97"
+  ],
+  "crossing_pedestrian_timestep_4": [
+   "205cce163e5a5b46",
+   "27ff47ea8aea59cf",
+   "3ebe88aecd0c5d20",
+   "4885d99d4c3959b8",
+   "bdb483626cc95b2b",
+   "cbf41000a2105ca1",
+   "debb1dafdd77545e",
+   "f0d1419c24b85651",
+   "f71e5dcd9df85d97"
+  ]
+ }
+}

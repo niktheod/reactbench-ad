@@ -11,9 +11,14 @@
 | SimWAM | 1433ee7 | see upstream | fetched | Evaluated model |
 | Blender | 4.5.11 LTS | GPL-3.0-or-later | fetched | Rendering of the inserted objects |
 | Microsoft Rocketbox avatars and animals | 0943055 | MIT | built by `scripts/assets.sh` | Pedestrians and standing animals |
-| OpenX vehicle assets | 463ea3d | MPL-2.0 AND CC-BY-4.0 | built by `scripts/assets.sh` | Cars (per-asset attribution in each `.xoma`) |
+| OpenX vehicle assets | 463ea3d | MPL-2.0 AND CC-BY-4.0 | built by `scripts/assets.sh` | Cars (models below; per-asset attribution also in each `.xoma`) |
 | Mercedes-Benz GLS (X167) 2019 3D model by Merc_TV (Sketchfab) | hood mesh only | CC-BY-4.0 | `reactbench/compositing/paiav/assets/ego_vehicle/gls_x167_hood.npz` | Ego-vehicle hood mask of the PAI-AV front camera |
-| Depth Anything V2 Small | Hugging Face | Apache-2.0 | downloaded on first use | Depth for occlusion handling |
+| Depth Anything V2 Small | 5426e4f (Hugging Face) | Apache-2.0 | `scripts/download_checkpoints.sh depth` | Depth for occlusion handling |
 
 The model weights are downloaded from their publishers (`scripts/download_checkpoints.sh`) under their own
 licences.
+
+**Vehicle models.** The seven cars, which appear in the edited ReactNAV, ReactTrain and ReactPAI images, are OpenX
+Assets adaptations of Sketchfab models licensed under CC BY 4.0: Audi TT Roadster (2014), Dacia Duster (2010),
+Hyundai Tucson (2015) and Mini Countryman (2016) by razor24; BMW X1 (2016) by mk2design; Volvo EX30 (2024) by
+Mehdi Lagzouli (LagzDesign); and Volvo V60 Polestar (2013) by myedsu.

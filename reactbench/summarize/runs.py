@@ -19,6 +19,7 @@ DATASETS = {
 MODELS = {"reactnav": ("alpamayo1_5", "alpamayo2", "autovla", "recogdrive", "drivewam", "simwam"),
           "reactpai": ("alpamayo1_5", "alpamayo2")}
 LABELS = {"alpamayo1_5": "Alpamayo 1.5", "alpamayo2": "Alpamayo 2", "autovla": "AutoVLA",
+          "autovla_l0r0": "AutoVLA (CAM_L0/R0)",
           "recogdrive": "ReCogDrive", "drivewam": "DriveWAM", "simwam": "SimWAM",
           "recogdrive_vlm": "ReCogDrive (VLM SFT)", "recogdrive_il": "ReCogDrive (IL)",
           "recogdrive_il_rt": "ReCogDrive (IL + RT)", "simwam_il": "SimWAM (IL)"}
