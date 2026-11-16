@@ -9,4 +9,3 @@
   and the crossing side per clip; the edited clips are regenerated locally from the original data.
 - The inserted cars are CC BY 4.0 Sketchfab models adapted by OpenX Assets; their attributions are in
   `THIRD_PARTY.md` ("Vehicle models") and apply to every edited image that shows them.
-- The per-sample scores contain metrics computed on these sets and no images or trajectories.

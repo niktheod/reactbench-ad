@@ -97,29 +97,27 @@ both predictions collide, and TIR the share of samples whose two predictions dif
        python -m reactbench.scoring outputs/predictions/<model>/reactpai
 
    Each run gets `metrics/*_at_fault_{per_sample,summary,manifest}.json`.
-3. Summarize, alone or next to the paper's models:
+3. Summarize, alone or next to the paper's models (their scored runs, from running them as in
+   [Reproducing the paper](#reproducing-the-paper)):
 
        python -m reactbench.summarize --models <model> --tables main tir
        python -m reactbench.summarize --models alpamayo1_5 recogdrive <model> --tables main tir --by-speed
 
 ## Reproducing the paper
 
-### Tables from the released scores (CPU, minutes)
+Set up the environments and checkpoints (below), run the models and analyses as in
+[Evaluation](#evaluation-section-4) and the sections after it, then
 
-    pip install -e .                      # numpy, scipy, shapely, pyyaml (Python >= 3.9)
-    REACTBENCH_OUTPUTS=/abs/path/to/scores python -m reactbench.summarize
+    python -m reactbench.summarize
 
-with the per-sample scores of every run (`<release link: scores>`) unpacked at `/abs/path/to/scores` (a relative
-`REACTBENCH_OUTPUTS` resolves against the repository root). It prints and writes to `<scores>/summaries/` the
-tables `main` (main and detailed results), `tir`, `side_cameras` (AutoVLA with CAM_L1/R1 or CAM_L0/R0),
-`training_stages`, `fine_tuning` (ReactNAV and navtest PDMS), `generalization` (unseen objects, real scenes),
-`real_scene_control` (ReCogDrive, DriveWAM and SimWAM on the real scenes), `speed_distribution`, `feasibility`
-(τ = 0.5 s, unavoidable samples), `cot` (CoT swap, fixed CoTs), `knockout` and `exploration_probe`; select some
-with `--tables`. Every cell uses the model's own valid original/edited pairs.
-`--tir-curves` and `--by-speed` also write the data of the TIR and ΔP-by-speed figures as CSV. All intervals are
-95% percentile bootstrap intervals over scenes with 10,000 resamples. The released scores contain no CoT texts or trajectories, so
-the CoT summary figure (`python -m reactbench.analysis.cot.summary`) and the original-scene plan comparison of IL
-and IL + RT (section 5, printed under `fine_tuning`) need the model outputs.
+prints and writes to `<outputs>/summaries/` the tables `main` (main and detailed results), `tir`, `side_cameras`
+(AutoVLA with CAM_L1/R1 or CAM_L0/R0), `training_stages`, `fine_tuning` (ReactNAV and navtest PDMS),
+`generalization` (unseen objects, real scenes), `real_scene_control` (ReCogDrive, DriveWAM and SimWAM on the real
+scenes), `speed_distribution`, `feasibility` (τ = 0.5 s, unavoidable samples), `cot` (CoT swap, fixed CoTs),
+`knockout` and `exploration_probe`; select some with `--tables`. Every cell uses the model's own valid
+original/edited pairs. `--tir-curves` and `--by-speed` also write the data of the TIR and ΔP-by-speed figures as
+CSV. All intervals are 95% percentile bootstrap intervals over scenes with 10,000 resamples. The CoT summary figure
+comes from `python -m reactbench.analysis.cot.summary`.
 
 ### Setup for running the models and the benchmark construction
 
@@ -256,7 +254,7 @@ not released. The ReactPAI clips are listed in `data/reactpai/selection_manifest
 
 `python -m reactbench.scoring.feasibility --reactnav outputs/predictions/recogdrive/reactnav --reactpai
 outputs/predictions/alpamayo1_5/reactpai` writes the per-sample braking-feasibility verdicts read by the
-`feasibility` table (NAVSIM logs and PAI-AV data needed; the verdicts are part of the released scores).
+`feasibility` table (NAVSIM logs and PAI-AV data needed).
 `python -m pytest tests` (`recogdrive` environment) checks the at-fault scoring, the output format and the
 real-scenes selection.
 
@@ -266,7 +264,7 @@ real-scenes selection.
 |---|---|
 | `reactbench/datasets/` | ReactNAV (`reactnav.py`: link/pack) and ReactPAI (`paiav.py`, `download_reactpai.py`) data, NAVSIM annotations |
 | `reactbench/scoring/` | At-fault scoring of ReactNAV and ReactPAI (`python -m reactbench.scoring`), braking feasibility |
-| `reactbench/summarize/` | All tables (`python -m reactbench.summarize`); `reactbench/export.py` writes the released scores |
+| `reactbench/summarize/` | All tables (`python -m reactbench.summarize`) |
 | `reactbench/models/` | Runners: Alpamayo 1.5, Alpamayo 2, AutoVLA, ReCogDrive, DriveWAM, SimWAM (the last three also on the real scenes) |
 | `reactbench/analysis/` | CoT swap and fixed CoTs, CoT summary, attention knockout, GRPO exploration probe |
 | `reactbench/compositing/` | NAVSIM and PAI-AV compositors (Blender), PCTNet harmonization (libcom 0.1.7) |
