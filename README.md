@@ -4,7 +4,7 @@
 
 ![ReactBench overview](docs/reactbench_overview.png)
 
-ReactBench-AD composites 3D assets into real NAVSIM (**ReactNAV**, 3,228 navtest samples) and PhysicalAI-Autonomous-Vehicles (**ReactPAI**, 1,045 clips) scenes along the ego vehicle's logged trajectory and measures the reaction of driving models by comparing the trajectories they predict for the original and edited scenes, both scored in the edited scene.
+ReactBench-AD composites 3D assets into real NAVSIM (**ReactNAV**, 3,228 navtest samples) and PhysicalAI-Autonomous-Vehicles (**ReactPAI**, 1,045 clips) scenes along the ego vehicle's logged trajectory and measures the reaction of driving models by comparing the trajectories they predict for the original and edited scenes, isolating the causal effect of the inserted object.
 
 ## The benchmark
 
