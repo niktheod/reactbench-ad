@@ -17,8 +17,10 @@ from mathutils import Quaternion, Vector
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = ROOT.parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+SCRIPT_DIR = Path(__file__).resolve().parent  # measure_pedestrian_geometry; Blender does not add it to sys.path
+for _path in (REPO_ROOT, SCRIPT_DIR):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 
 from reactbench.scoring.pedestrian_geometry import PEDESTRIAN_GEOMETRY_PROFILE_VERSION  # noqa: E402
 from measure_pedestrian_geometry import measure_gait_union_geometry  # noqa: E402
