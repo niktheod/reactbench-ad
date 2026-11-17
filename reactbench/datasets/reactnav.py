@@ -3,21 +3,23 @@
 A ReactNAV run ``<object>_timestep_<k>`` holds, per navtest token, the twelve model inputs
 ``final_images/<token>/{CAM_L0,CAM_F0,CAM_R0}/{0,1,2,3}.{png,jpg}`` (frame 3 is the current frame, 0.5 s apart),
 the placement of the inserted object in ``metadata/<token>.json``, and ``run_config.json``. Only the frames that
-the object changes are released (PNG); the unchanged ones are the original navtest JPEGs, which ``link`` adds as
-links into the user's NAVSIM ``sensor_blobs`` (paths from the NAVSIM annotations):
+the object changes are released, as JPEGs with navtest's own settings (quality 80, 4:2:0 chroma subsampling); the
+compositor writes them as lossless PNGs, which the paper evaluated. The unchanged frames are the original navtest
+JPEGs, which ``link`` adds as links into the user's NAVSIM ``sensor_blobs`` (paths from the NAVSIM annotations):
 
     python -m reactbench.datasets.navsim_annotations data/reactnav/reactnav.yaml   # <outputs>/annotations/reactnav.json
     python -m reactbench.datasets.reactnav link [RUNS_ROOT]                         # default: reactnav in configs/paths.yaml
 
-Authors: ``python -m reactbench.datasets.reactnav pack SOURCE_ROOT OUTPUT_ROOT`` copies the edited frames and the
-metadata of compacted compositor runs and writes a ``run_config.json`` without machine paths.
+Authors: ``python -m reactbench.datasets.reactnav pack SOURCE_ROOT OUTPUT_ROOT`` saves the edited frames of
+compacted compositor runs as JPEGs, copies their metadata and writes a ``run_config.json`` without machine paths.
 """
 from __future__ import annotations
 
 import argparse
 import json
-import shutil
 from pathlib import Path
+
+from PIL import Image
 
 from .. import paths
 from ..io import read_json, relative, write_json
@@ -27,6 +29,8 @@ CAMERAS = {"CAM_L0": "front_left_camera", "CAM_F0": "front_camera", "CAM_R0": "f
 FRAMES = 4
 SCENE_FILTER = "data/reactnav/reactnav.yaml"
 SUFFIXES = (".png", ".jpg", ".jpeg")
+# The released edited frames: navtest's own JPEG settings (its images use the quality-80 tables and 4:2:0).
+JPEG_OPTIONS = {"quality": 80, "subsampling": "4:2:0", "optimize": True}
 
 
 def released_runs(root):
@@ -43,7 +47,8 @@ def released_runs(root):
 
 
 def pack(source_root, output_root, *, runs=None, max_tokens=None):
-    """Copy the edited frames and metadata of each run; unchanged frames (links to navtest) are left out."""
+    """Save the edited frames of each run as JPEGs and copy its metadata; unchanged frames (links to navtest) are
+    left out."""
     output_root = Path(output_root)
     for name, run in released_runs(source_root).items():
         if runs and name not in runs:
@@ -60,9 +65,13 @@ def pack(source_root, output_root, *, runs=None, max_tokens=None):
         for token in tokens:
             for image in sorted((run / "final_images" / token).rglob("*")):
                 if image.is_file() and not image.is_symlink():
+                    if image.suffix != ".png":
+                        raise ValueError(f"Edited frames of a compacted run are PNGs: {image}")
                     destination = target / "final_images" / image.relative_to(run / "final_images")
+                    destination = destination.with_suffix(".jpg")
                     destination.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(image, destination)
+                    with Image.open(image) as frame:
+                        frame.convert("RGB").save(destination, "JPEG", **JPEG_OPTIONS)
                     edited += 1
             write_json(target / "metadata" / f"{token}.json", relative(read_json(run / "metadata" / f"{token}.json")))
         print(f"{name}: {len(tokens)} tokens, {edited} edited frames", flush=True)
@@ -99,7 +108,7 @@ def main(argv=None):
     command = commands.add_parser("link", help="Add the unchanged navtest frames (users)")
     command.add_argument("runs_root", type=Path, nargs="?", help="Default: reactnav in configs/paths.yaml")
     command.add_argument("--annotations", type=Path, help="Default: <outputs>/annotations/reactnav.json")
-    command = commands.add_parser("pack", help="Copy the edited frames and metadata for release (authors)")
+    command = commands.add_parser("pack", help="Save the edited frames (JPEG) and metadata for release (authors)")
     command.add_argument("source_root", type=Path)
     command.add_argument("output_root", type=Path)
     command.add_argument("--runs", nargs="+", help="Released run names (default: all insertion runs)")

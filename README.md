@@ -66,7 +66,9 @@ both predictions collide, and TIR the share of samples whose two predictions dif
 
 **ReactNAV** is released; it builds on your copy of NAVSIM navtest (OpenScene logs, sensor blobs and maps).
 
-1. Download the edited images (`<release link: ReactNAV>`, CC BY-NC-SA 4.0) to `datasets/reactnav/`.
+1. Download the edited images (`<release link: ReactNAV>`, CC BY-NC-SA 4.0) to `datasets/reactnav/`. They are
+   JPEGs saved with navtest's own settings (quality 80, 4:2:0); the paper evaluated the lossless PNGs that the
+   benchmark construction (below) writes.
 2. Set `navsim_data` in `configs/paths.yaml` (`cp configs/paths.example.yaml configs/paths.yaml`).
 3. `python -m reactbench.datasets.navsim_annotations data/reactnav/reactnav.yaml` (NAVSIM devkit; writes
    `<outputs>/annotations/reactnav.json`).
@@ -281,5 +283,20 @@ real-scenes selection.
 
 ## Licences and acknowledgements
 
-Code: Apache-2.0 (`LICENSE`). Data: `DATA_LICENSE.md`. Third-party code and assets: `THIRD_PARTY.md`.
+The code is Apache-2.0 (`LICENSE`). The modified ReCogDrive copy in `third_party/recogdrive` (changes in
+`CHANGES.md`) and the libcom subset in `reactbench/compositing/harmonization` keep their Apache-2.0 licences. The
+evaluated models, Blender and the pretrained weights are fetched from their publishers (`third_party/setup.sh`,
+`scripts/download_checkpoints.sh`) under their own licences.
+
+ReactNAV, the lane polygons and the files in `data/reactnav/`, `data/reacttrain/` and `data/real_scenes/` are
+derived from nuPlan, OpenScene and NAVSIM and are released under CC BY-NC-SA 4.0, the licence of those datasets.
+ReactPAI is not redistributed: `data/reactpai/` and `data/knockout/` hold only PAI-AV clip identifiers and, for
+ReactPAI, the PAI-AV files each clip is read from and its crossing side.
+
+The pedestrians and animals are built from Microsoft Rocketbox avatars (MIT,
+`reactbench/assets/rocketbox/ROCKETBOX_LICENSE.md`). The seven cars are OpenX Assets adaptations of CC BY 4.0
+Sketchfab models: Audi TT Roadster (2014), Dacia Duster (2010), Hyundai Tucson (2015) and Mini Countryman (2016) by
+razor24; BMW X1 (2016) by mk2design; Volvo EX30 (2024) by Mehdi Lagzouli (LagzDesign); and Volvo V60 Polestar
+(2013) by myedsu. The PAI-AV hood mask is derived from "Mercedes-Benz GLS (X167) 2019" by Merc_TV (CC BY 4.0).
+
 <Acknowledgements>
