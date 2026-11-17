@@ -7,7 +7,8 @@
 # All downloads are pinned to the revisions of the paper's runs. Alpamayo 1.5 (nvidia/Alpamayo-1.5-10B) and
 # Alpamayo 2 (nvidia/Alpamayo2-Super) load from the Hugging Face cache (`hf_home`) at the revisions in their
 # configs. `depth` downloads Depth Anything V2 Small, which the compositors run offline, into `hf_home`. The
-# fine-tuned IL + RT checkpoint is released separately (README) and goes to recogdrive/IL_RT/recogdrive_il_rt.ckpt.
+# fine-tuned IL + RT checkpoint is not released: scripts/reacttrain/train.sh trains it, and it goes to
+# recogdrive/IL_RT/recogdrive_il_rt.ckpt.
 #   scripts/download_checkpoints.sh [recogdrive autovla drivewam simwam depth]
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/env.sh"

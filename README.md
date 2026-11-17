@@ -127,8 +127,7 @@ with 10,000 resamples.
    also be set as `REACTBENCH_<KEY>`).
 4. `scripts/download_checkpoints.sh` downloads ReCogDrive, AutoVLA, DriveWAM and SimWAM (then run
    `python -m reactbench.models.simwam.prompt_embedding` in the `simwam` environment). The Alpamayo models load from
-   the Hugging Face cache (accept their licences and log in). The ReCogDrive IL + RT checkpoint
-   (`<release link: checkpoint>`) goes to `checkpoints/recogdrive/IL_RT/recogdrive_il_rt.ckpt`.
+   the Hugging Face cache (accept their licences and log in).
 
 ### Evaluation
 
@@ -149,8 +148,8 @@ for model in alpamayo1_5 alpamayo2; do                                          
 done
 ```
 
-`--config` selects a configuration, each with its own `--original` pass: ReCogDrive `rl` (default), `il`, `vlm_sft`
-and `il_rt` (IL fine-tuned on ReactTrain); SimWAM `rl` (default) and `il`; AutoVLA `config` (default) and `l0r0`.
+`--config` selects a configuration, each with its own `--original` pass: ReCogDrive `rl` (default), `il` and
+`vlm_sft`; SimWAM `rl` (default) and `il`; AutoVLA `config` (default) and `l0r0`.
 `--max-samples N` runs a smoke test, `--overwrite` replaces an existing output. GPU numerics differ slightly between
 GPU models; the paper's runs used NVIDIA A100 and H100 GPUs.
 

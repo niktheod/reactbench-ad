@@ -1,4 +1,4 @@
-# ReCogDrive IL checkpoint fine-tuned on ReactTrain (paper section 5).
+# ReCogDrive IL checkpoint fine-tuned on ReactTrain (paper section 5; not released, scripts/reacttrain/train.sh trains it).
 name: recogdrive_il_rt
 _target_: navsim.agents.recogdrive.recogdrive_agent.ReCogDriveAgent
 _convert_: all
