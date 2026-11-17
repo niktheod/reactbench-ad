@@ -1,7 +1,7 @@
 <h1 align="center">ReactBench-AD: Do Driving VLAs and World-Action Models React to Imminent Hazards in Their Path?</h1>
 
 <p align="center">
-  <a href="<arXiv link>">Paper</a> &nbsp;|&nbsp;
+  <a href="<arXiv link>">Paper</a>  | 
   <a href="<release link: ReactNAV>">Download</a>
 </p>
 
@@ -37,9 +37,9 @@ sample with the same ID.
 **ReactNAV** is released; it builds on your copy of NAVSIM navtest (OpenScene logs, sensor blobs and maps).
 
 1. Download the edited images (`<release link: ReactNAV>`, CC BY-NC-SA 4.0) to `datasets/reactnav/`. They are
-   JPEGs saved with navtest's own settings (quality 80, 4:2:0); the paper evaluated the lossless PNGs that the
-   benchmark construction (below) writes.
-2. Set `navsim_data` in `configs/paths.yaml` (`cp configs/paths.example.yaml configs/paths.yaml`).
+   JPEGs saved with navtest's own settings (quality 80, 4:2:0).
+2. Create your path settings from the template, `cp configs/paths.example.yaml configs/paths.yaml`, and set
+   `navsim_data` in `configs/paths.yaml` to your NAVSIM data folder.
 3. `python -m reactbench.datasets.navsim_annotations data/reactnav/reactnav.yaml` (NAVSIM devkit; writes
    `<outputs>/annotations/reactnav.json`).
 4. `python -m reactbench.datasets.reactnav link`: the release holds only the frames the object changes; this adds
@@ -54,7 +54,7 @@ sample with the same ID.
 2. `python -m reactbench.datasets.download_reactpai` (`paiav_root` in `configs/paths.yaml`) downloads only the
    1,045 clips' cameras, LiDAR, egomotion, calibration and obstacle labels (about 470 GB, against ~10 TB for the
    whole archives); `--dry-run` previews it.
-3. Composite the 12 runs as in [Benchmark construction](#benchmark-construction). This needs the compositing setup
+3. Composite the 12 runs as in [Benchmark construction](#benchmark-construction-section-3). This needs the compositing setup
    (Blender, Depth Anything, the assets, two environments) and GPUs for rendering and harmonization.
 
 ## Evaluating your model
