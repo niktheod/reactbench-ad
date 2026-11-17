@@ -2,14 +2,14 @@
 
 <p align="center">
   <a href="https://arxiv.org/abs/2611.20011">Paper</a>  | 
-  <a href="<release link: ReactNAV>">Download</a>
+  <a href="https://huggingface.co/datasets/niktheod/reactbench-ad">Download</a>
 </p>
 
 <p align="center">
   <img src="docs/reactbench_overview.png" alt="ReactBench-AD overview" width="100%">
 </p>
 
-ReactBench-AD composites 3D assets into real NAVSIM (**ReactNAV**, 3,228 navtest samples) and PhysicalAI-Autonomous-Vehicles (**ReactPAI**, 1,045 clips) scenes along the ego vehicle's logged trajectory and measures the reaction of driving models by comparing the trajectories they predict for the original and edited scenes, isolating the causal effect of the inserted object.
+ReactBench-AD composites 3D assets into real NAVSIM (**ReactNAV**, 3,228 navtest samples) and PhysicalAI-Autonomous-Vehicles (**ReactPAI**, 1,045 clips) scenes along the ego vehicle's logged trajectory and measures the reaction of driving models by comparing the trajectory they predict for the original scene ($y^O$) with the one for the edited scene ($y^E$), isolating the causal effect of the inserted object.
 
 ## The benchmark
 
@@ -57,15 +57,14 @@ with 10,000 resamples.
 
 **ReactNAV** is released; it builds on your copy of NAVSIM navtest (OpenScene logs, sensor blobs and maps).
 
-1. Download the edited images (`<release link: ReactNAV>`, CC BY-NC-SA 4.0) to `datasets/reactnav/`. They are
-   JPEGs saved with navtest's own settings (quality 80, 4:2:0).
+1. Download the edited images ([Hugging Face](https://huggingface.co/datasets/niktheod/reactbench-ad), CC BY-NC-SA 4.0) and extract them into `datasets/reactnav/`.
 2. Create your path settings from the template, `cp configs/paths.example.yaml configs/paths.yaml`, and set
    `navsim_data` in `configs/paths.yaml` to your NAVSIM data folder.
 3. `python -m reactbench.datasets.navsim_annotations data/reactnav/reactnav.yaml` (NAVSIM devkit, e.g. the
    `recogdrive` environment of [Setup](#setup); writes `<outputs>/annotations/reactnav.json`).
 4. `python -m reactbench.datasets.reactnav link`: the release holds only the frames the object changes; this adds
    the unchanged frames as links to your navtest images.
-5. Download the lane polygons (`<release link: lanes>`) to `outputs/work/navsim/lanes/` (`scoring_work`); the
+5. Download the lane polygons ([Hugging Face](https://huggingface.co/datasets/niktheod/reactbench-ad)) to `outputs/work/navsim/lanes/` (`scoring_work`); the
    ReactNAV scorer needs them. Regenerating them needs a NAVSIM v2 navtest metric cache:
    `python -m reactbench.scoring.navsim_lanes --tokens-from outputs/annotations/reactnav.json data/real_scenes/navtest_v2.json --metric-cache <cache>` with the NAVSIM v2 devkit on `PYTHONPATH`.
 
@@ -113,14 +112,14 @@ with 10,000 resamples.
 2. Environments (`conda env create -f envs/<name>.yml`; the Alpamayo ones are uv environments, see the head of
    `envs/alpamayo*.txt`):
 
-   | Environment                    | Used for                                                                    |
-   | ------------------------------ | --------------------------------------------------------------------------- |
-   | `recogdrive`                 | ReCogDrive, scoring (`scoring_python`), NAVSIM annotations                |
+   | Environment                    | Used for                                                                     |
+   | ------------------------------ | ---------------------------------------------------------------------------- |
+   | `recogdrive`                 | ReCogDrive, scoring (`scoring_python`), NAVSIM annotations                 |
    | `autovla`                    | AutoVLA; PAI-AV compositing (`PYTHON=` for `scripts/composite_paiav.sh`) |
    | `compositing-navsim`         | NAVSIM compositing (`PYTHON=` for `scripts/composite_navsim.sh`), assets |
    | `pctnet`                     | PCTNet harmonization (`PCTNET_PYTHON=`)                                    |
-   | `drivewam`, `simwam`       | DriveWAM, SimWAM                                                            |
-   | `alpamayo1_5`, `alpamayo2` | Alpamayo 1.5, Alpamayo 2                                                    |
+   | `drivewam`, `simwam`       | DriveWAM, SimWAM                                                             |
+   | `alpamayo1_5`, `alpamayo2` | Alpamayo 1.5, Alpamayo 2                                                     |
 
    Run commands from the repository root with `PYTHONPATH=third_party/recogdrive:.` (`scripts/env.sh`).
 3. `configs/paths.yaml`: the NAVSIM data, `paiav_root`, checkpoints, outputs and `scoring_python` (any key can
