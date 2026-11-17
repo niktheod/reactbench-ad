@@ -2,6 +2,13 @@
 
 **ReactBench-AD: Do Driving VLAs and World-Action Models React to Imminent Hazards in Their Path?** · <Authors> · [Paper](<arXiv link>) · [Project page](<project page>)
 
+![ReactBench overview](docs/reactbench_overview.png)
+
+*Left: the target on the logged ego trajectory at look-ahead τ; a crossing pedestrian reaches it at t + τ. Middle: the
+pedestrian composited into every camera view and history frame (top: the original current frame). Right:
+ReCogDrive's plans for the original (y<sup>O</sup>, dashed) and edited (y<sup>E</sup>, solid) input, both scored in
+the edited scene.*
+
 ReactBench measures how driving models react to objects that appear in their path. It edits real NAVSIM
 (**ReactNAV**, 3,228 navtest scenes) and PhysicalAI-Autonomous-Vehicles (**ReactPAI**, 1,045 clips) samples:
 a crossing pedestrian, a standing pedestrian or a stationary car is composited into the camera images so that
