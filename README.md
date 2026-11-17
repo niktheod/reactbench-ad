@@ -1,34 +1,10 @@
-# ReactBench
+# ReactBench-AD
 
-**ReactBench-AD: Do Driving VLAs and World-Action Models React to Imminent Hazards in Their Path?** · <Authors> · [Paper](<arXiv link>) · [Project page](<project page>)
+**ReactBench-AD: Do Driving VLAs and World-Action Models React to Imminent Hazards in Their Path?** · <Authors></authors> · [Paper](<arXiv link>) · [Project page](<project page>)
 
 ![ReactBench overview](docs/reactbench_overview.png)
 
-*Left: the target on the logged ego trajectory at look-ahead τ; a crossing pedestrian reaches it at t + τ. Middle: the
-pedestrian composited into every camera view and history frame (top: the original current frame). Right:
-ReCogDrive's plans for the original (y<sup>O</sup>, dashed) and edited (y<sup>E</sup>, solid) input, both scored in
-the edited scene.*
-
-ReactBench measures how driving models react to objects that appear in their path. It edits real NAVSIM
-(**ReactNAV**, 3,228 navtest scenes) and PhysicalAI-Autonomous-Vehicles (**ReactPAI**, 1,045 clips) samples:
-a crossing pedestrian, a standing pedestrian or a stationary car is composited into the camera images so that
-the logged ego trajectory reaches it after a look-ahead time τ ∈ {0.5, 1.0, 1.5, 2.0} s. A model is run on the
-original and on the edited scene of each sample, and both predictions are scored in the edited scene.
-**ReactTrain** (paper section 5) fine-tunes ReCogDrive on edited navtrain scenes.
-
-**Main result** (ΔP in percentage points, higher is better; * the paired 95% bootstrap CI includes zero):
-
-| ReactNAV | Cross. τ=0.5 | 1.0 | 1.5 | 2.0 | Stand. τ=0.5 | 1.0 | 1.5 | 2.0 | Car τ=0.5 | 1.0 | 1.5 | 2.0 |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Alpamayo 1.5 | +0.25 | +3.10 | +7.16 | +8.71 | +0.09* | +3.66 | +11.93 | +17.63 | +0.12 | +3.84 | +15.92 | +28.81 |
-| Alpamayo 2 | +0.06* | +2.11 | +6.75 | +8.36 | +0.03* | +3.25 | +9.42 | +12.33 | +0.12 | +5.36 | +19.39 | +22.43 |
-| AutoVLA | +0.00* | -0.03* | +0.53 | +0.90 | +0.00* | +0.16 | +0.34 | +0.96 | +0.03* | +0.87 | +2.14 | +3.26 |
-| ReCogDrive | +0.00* | -0.03* | +0.22 | +0.40 | +0.00* | +0.00* | +0.12 | +0.40 | +0.00* | +0.00* | +0.28 | +1.89 |
-| DriveWAM | +0.00* | +0.06* | +0.12 | +0.09* | +0.00* | +0.12 | +0.56 | +2.08 | +0.00* | +1.77 | +3.62 | +5.61 |
-| SimWAM | +0.00* | +0.06* | +0.12 | +0.22 | +0.00* | +0.00* | +0.15 | +0.71 | +0.00* | +0.06* | +0.99 | +2.26 |
-| **ReactPAI** | | | | | | | | | | | | |
-| Alpamayo 1.5 | +0.10* | +5.55 | +25.17 | +35.12 | +0.19* | +5.07 | +21.63 | +35.69 | +0.67 | +12.92 | +20.86 | +25.65 |
-| Alpamayo 2 | +0.00* | +3.44 | +22.68 | +34.07 | +0.00* | +0.57 | +8.61 | +15.89 | +0.10* | +5.55 | +16.65 | +25.17 |
+ReactBench-AD composites 3D assets into real NAVSIM (**ReactNAV**, 3,228 navtest samples) and PhysicalAI-Autonomous-Vehicles (**ReactPAI**, 1,045 clips) scenes along the ego vehicle's logged trajectory and measures the reaction of driving models by comparing the trajectories they predict for the original and edited scenes, both scored in the edited scene.
 
 ## The benchmark
 
@@ -54,8 +30,8 @@ token; the original scene is the unedited source sample with the same token.
 
 Save one prediction per sample and scene:
 
-    <outputs>/predictions/<model>/<reactnav|reactpai>/original/trajectories/<token>.npz   # original scene
-    <outputs>/predictions/<model>/<reactnav|reactpai>/<run>/trajectories/<token>.npz      # edited scene
+    <outputs></outputs>/predictions/<model></model>/<reactnav|reactpai>/original/trajectories/<token></token>.npz   # original scene
+    <outputs></outputs>/predictions/<model></model>/<reactnav|reactpai>/<run></run>/trajectories/<token></token>.npz      # edited scene
 
 Each `.npz` holds `trajectory`, a float array (N, 3) of rear-axle poses (x, y, heading) in the ego frame at
 the current frame (x forward, y left, heading in radians), where pose i is at time (i + 1) · dt, and
@@ -83,8 +59,7 @@ both predictions collide, and TIR the share of samples whose two predictions dif
    the unchanged frames as links to your navtest images.
 5. Download the lane polygons (`<release link: lanes>`) to `outputs/work/navsim/lanes/` (`scoring_work`); the
    ReactNAV scorer needs them. Regenerating them needs a NAVSIM v2 navtest metric cache:
-   `python -m reactbench.scoring.navsim_lanes --tokens-from outputs/annotations/reactnav.json
-   data/real_scenes/navtest_v2.json --metric-cache <cache>` with the NAVSIM v2 devkit on `PYTHONPATH`.
+   `python -m reactbench.scoring.navsim_lanes --tokens-from outputs/annotations/reactnav.json data/real_scenes/navtest_v2.json --metric-cache <cache>` with the NAVSIM v2 devkit on `PYTHONPATH`.
 
 **ReactPAI** cannot be redistributed (PAI-AV licence) and is regenerated from the original clips:
 
@@ -102,15 +77,15 @@ both predictions collide, and TIR the share of samples whose two predictions dif
    run layout, paired seeds, failure handling and scoring (`models/drivewam/eval.py` is about 50 lines).
 2. Score them (CPU; Python with the NAVSIM devkit for ReactNAV, `scoring_python` in `configs/paths.yaml`):
 
-       python -m reactbench.scoring outputs/predictions/<model>/reactnav [--workers 8]
-       python -m reactbench.scoring outputs/predictions/<model>/reactpai
+   python -m reactbench.scoring outputs/predictions/<model></model>/reactnav [--workers 8]
+   python -m reactbench.scoring outputs/predictions/<model></model>/reactpai
 
    Each run gets `metrics/*_at_fault_{per_sample,summary,manifest}.json`.
 3. Summarize, alone or next to the paper's models (their scored runs, from running them as in
    [Reproducing the paper](#reproducing-the-paper)):
 
-       python -m reactbench.summarize --models <model> --tables main tir
-       python -m reactbench.summarize --models alpamayo1_5 recogdrive <model> --tables main tir --by-speed
+   python -m reactbench.summarize --models <model></model> --tables main tir
+   python -m reactbench.summarize --models alpamayo1_5 recogdrive <model></model> --tables main tir --by-speed
 
 ## Reproducing the paper
 
@@ -136,14 +111,14 @@ comes from `python -m reactbench.analysis.cot.summary`.
 2. Environments (`conda env create -f envs/<name>.yml`; the Alpamayo ones are uv environments, see the head of
    `envs/alpamayo*.txt`):
 
-   | Environment | Used for |
-   |---|---|
-   | `recogdrive` | ReCogDrive, scoring (`scoring_python`), annotations, ReactTrain, navtest PDMS, real scenes, probe, tests |
-   | `autovla` | AutoVLA; PAI-AV compositing (`PYTHON=` for `scripts/composite_paiav.sh`) |
-   | `compositing-navsim` | NAVSIM compositing (`PYTHON=` for `scripts/composite_navsim.sh`), assets |
-   | `pctnet` | PCTNet harmonization (`PCTNET_PYTHON=`) |
-   | `drivewam`, `simwam` | DriveWAM, SimWAM |
-   | `alpamayo1_5`, `alpamayo2` | Alpamayo 1.5, Alpamayo 2 |
+   | Environment                    | Used for                                                                                                   |
+   | ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+   | `recogdrive`                 | ReCogDrive, scoring (`scoring_python`), annotations, ReactTrain, navtest PDMS, real scenes, probe, tests |
+   | `autovla`                    | AutoVLA; PAI-AV compositing (`PYTHON=` for `scripts/composite_paiav.sh`)                               |
+   | `compositing-navsim`         | NAVSIM compositing (`PYTHON=` for `scripts/composite_navsim.sh`), assets                               |
+   | `pctnet`                     | PCTNet harmonization (`PCTNET_PYTHON=`)                                                                  |
+   | `drivewam`, `simwam`       | DriveWAM, SimWAM                                                                                           |
+   | `alpamayo1_5`, `alpamayo2` | Alpamayo 1.5, Alpamayo 2                                                                                   |
 
    Run commands from the repository root with `PYTHONPATH=third_party/recogdrive:.` (`scripts/env.sh`).
 3. `configs/paths.yaml`: the NAVSIM data, `paiav_root`, checkpoints, outputs and `scoring_python` (any key can
@@ -261,26 +236,25 @@ not released. The ReactPAI clips are listed in `data/reactpai/selection_manifest
 
 ### Unavoidable collisions and tests
 
-`python -m reactbench.scoring.feasibility --reactnav outputs/predictions/recogdrive/reactnav --reactpai
-outputs/predictions/alpamayo1_5/reactpai` writes the per-sample braking-feasibility verdicts read by the
+`python -m reactbench.scoring.feasibility --reactnav outputs/predictions/recogdrive/reactnav --reactpai outputs/predictions/alpamayo1_5/reactpai` writes the per-sample braking-feasibility verdicts read by the
 `feasibility` table (NAVSIM logs and PAI-AV data needed).
 `python -m pytest tests` (`recogdrive` environment) checks the at-fault scoring, the output format and the
 real-scenes selection.
 
 ## Layout
 
-| Path | Contents |
-|---|---|
-| `reactbench/datasets/` | ReactNAV (`reactnav.py`: link/pack) and ReactPAI (`paiav.py`, `download_reactpai.py`) data, NAVSIM annotations |
-| `reactbench/scoring/` | At-fault scoring of ReactNAV and ReactPAI (`python -m reactbench.scoring`), braking feasibility |
-| `reactbench/summarize/` | All tables (`python -m reactbench.summarize`) |
-| `reactbench/models/` | Runners: Alpamayo 1.5, Alpamayo 2, AutoVLA, ReCogDrive, DriveWAM, SimWAM (the last three also on the real scenes) |
-| `reactbench/analysis/` | CoT swap and fixed CoTs, CoT summary, attention knockout, GRPO exploration probe |
-| `reactbench/compositing/` | NAVSIM and PAI-AV compositors (Blender), PCTNet harmonization (libcom 0.1.7) |
-| `reactbench/assets/`, `reactbench/selection/` | Builders of the inserted objects; real-scenes selection, ReactTrain intersection |
-| `third_party/` | Modified ReCogDrive with its NAVSIM devkit; `setup.sh` and `patches/` for the other models |
-| `data/` | Scene and clip lists, crossing and benign sides, AutoVLA's side-camera exclusions, real-scenes scenes, knockout clips |
-| `scripts/`, `envs/`, `configs/`, `tests/` | Launchers, environments, `paths.example.yaml`, unit tests |
+| Path                                              | Contents                                                                                                              |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `reactbench/datasets/`                          | ReactNAV (`reactnav.py`: link/pack) and ReactPAI (`paiav.py`, `download_reactpai.py`) data, NAVSIM annotations  |
+| `reactbench/scoring/`                           | At-fault scoring of ReactNAV and ReactPAI (`python -m reactbench.scoring`), braking feasibility                     |
+| `reactbench/summarize/`                         | All tables (`python -m reactbench.summarize`)                                                                       |
+| `reactbench/models/`                            | Runners: Alpamayo 1.5, Alpamayo 2, AutoVLA, ReCogDrive, DriveWAM, SimWAM (the last three also on the real scenes)     |
+| `reactbench/analysis/`                          | CoT swap and fixed CoTs, CoT summary, attention knockout, GRPO exploration probe                                      |
+| `reactbench/compositing/`                       | NAVSIM and PAI-AV compositors (Blender), PCTNet harmonization (libcom 0.1.7)                                          |
+| `reactbench/assets/`, `reactbench/selection/` | Builders of the inserted objects; real-scenes selection, ReactTrain intersection                                      |
+| `third_party/`                                  | Modified ReCogDrive with its NAVSIM devkit; `setup.sh` and `patches/` for the other models                        |
+| `data/`                                         | Scene and clip lists, crossing and benign sides, AutoVLA's side-camera exclusions, real-scenes scenes, knockout clips |
+| `scripts/`, `envs/`, `configs/`, `tests/` | Launchers, environments, `paths.example.yaml`, unit tests                                                           |
 
 ## Citation
 
