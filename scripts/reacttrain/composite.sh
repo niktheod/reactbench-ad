@@ -8,14 +8,17 @@ ROOT="$(location reacttrain datasets/reacttrain)"
 DATA="$REPO/data/reacttrain"
 COMMON=(--filter "$DATA/reacttrain.yaml" --split trainval --max-samples 2000 --output-root "$(dirname "$ROOT")"
         --min-front-visible-fraction 0.25)  # at least 25% of the object's projected box inside the front camera
+TAUS=(0.5 1.0 1.5 2.0)  # the runs keep their working names, with t = tau in 0.5 s frames
 for t in 1 2 3 4; do
-    "$REPO/scripts/composite_navsim.sh" "${COMMON[@]}" --directions "$DATA/directions.json" "hazardous_walking_timestep_${t}_n2000" "$t"
-    "$REPO/scripts/composite_navsim.sh" "${COMMON[@]}" --standing "hazardous_standing_timestep_${t}_n2000" "$t"
-    "$REPO/scripts/composite_navsim.sh" "${COMMON[@]}" --car "hazardous_car_timestep_${t}_n2000" "$t"
+    tau="${TAUS[t-1]}"
+    "$REPO/scripts/composite_navsim.sh" "${COMMON[@]}" --directions "$DATA/directions.json" \
+        --run-name "hazardous_walking_timestep_${t}_n2000" "$tau"
+    "$REPO/scripts/composite_navsim.sh" "${COMMON[@]}" --standing --run-name "hazardous_standing_timestep_${t}_n2000" "$tau"
+    "$REPO/scripts/composite_navsim.sh" "${COMMON[@]}" --car --run-name "hazardous_car_timestep_${t}_n2000" "$tau"
     for object in walking standing car; do
         mode=(); [[ $object == standing ]] && mode=(--standing); [[ $object == car ]] && mode=(--car)
         "$REPO/scripts/composite_navsim.sh" "${COMMON[@]}" "${mode[@]}" --benign --benign-sides "$DATA/benign_sides.json" \
-            "benign_${object}_timestep_${t}_n2000" "$t"
+            --run-name "benign_${object}_timestep_${t}_n2000" "$tau"
     done
 done
 "$PYTHON" -m reactbench.selection.reacttrain intersect "$ROOT"

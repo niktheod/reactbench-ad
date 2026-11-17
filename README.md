@@ -1,8 +1,13 @@
-# ReactBench-AD
+<h1 align="center">ReactBench-AD: Do Driving VLAs and World-Action Models React to Imminent Hazards in Their Path?</h1>
 
-**ReactBench-AD: Do Driving VLAs and World-Action Models React to Imminent Hazards in Their Path?** · <Authors></authors> · [Paper](<arXiv link>) · [Project page](<project page>)
+<p align="center">
+  <a href="<arXiv link>">Paper</a> &nbsp;|&nbsp;
+  <a href="<release link: ReactNAV>">Download</a>
+</p>
 
-![ReactBench overview](docs/reactbench_overview.png)
+<p align="center">
+  <img src="docs/reactbench_overview.png" alt="ReactBench-AD overview" width="100%">
+</p>
 
 ReactBench-AD composites 3D assets into real NAVSIM (**ReactNAV**, 3,228 navtest samples) and PhysicalAI-Autonomous-Vehicles (**ReactPAI**, 1,045 clips) scenes along the ego vehicle's logged trajectory and measures the reaction of driving models by comparing the trajectories they predict for the original and edited scenes, isolating the causal effect of the inserted object.
 
@@ -10,40 +15,22 @@ ReactBench-AD composites 3D assets into real NAVSIM (**ReactNAV**, 3,228 navtest
 
 ### Samples
 
-A dataset has 12 runs, one per inserted object and look-ahead time, named `<object>_timestep_<k>`
-(`crossing_pedestrian`, `standing_pedestrian`, `car`; τ = k × frame interval). A sample is identified by its
-token; the original scene is the unedited source sample with the same token.
+ReactBench-AD has two parts: ReactNAV, built on NAVSIM navtest, and ReactPAI, built on PhysicalAI-AV. Each comes in
+12 edited versions (runs), one per inserted object and look-ahead time τ, in folders named `<object>_tau<τ>s`: a
+`crossing_pedestrian`, `standing_pedestrian` or `car` at τ = 0.5, 1.0, 1.5 or 2.0 s (e.g. `car_tau1.0s`). Inside a
+run, each sample is a folder named by its NAVSIM token or PAI-AV clip ID, and its original scene is the unedited
+sample with the same ID.
 
-- **ReactNAV** (k = 1-4, frames 0.5 s apart): `final_images/<token>/{CAM_L0,CAM_F0,CAM_R0}/{0,1,2,3}.{png,jpg}`,
-  the front-left, front and front-right cameras over four history frames (3 is the current frame). The ego
-  history, velocity, acceleration and driving command are those of the NAVSIM navtest sample, available as
+- **ReactNAV**: `final_images/<token>/{CAM_L0,CAM_F0,CAM_R0}/{0,1,2,3}.{png,jpg}`, the front-left, front and
+  front-right cameras over four history frames 0.5 s apart (3 is the current frame). The ego history, velocity,
+  acceleration and driving command are those of the NAVSIM navtest sample, available as
   `<outputs>/annotations/reactnav.json` (below), together with the paths of the original images.
-- **ReactPAI** (k = 5, 10, 15, 20, frames 0.1 s apart): `final_images/<clip>/<camera>/{0,1,2,3}.{png,jpg}` for
-  `camera_cross_left_120fov`, `camera_front_wide_120fov`, `camera_cross_right_120fov` and
-  `camera_front_tele_30fov`. The original images, the ego history (16 poses at 10 Hz) and the vehicle geometry
-  come from the PAI-AV download; `reactbench.datasets.paiav.PAIAVCompactRun` loads them
-  (`edited_camera_paths`, `materialize_original_images`, `ego_history`, `ego_vehicle_geometry`). There is no
-  navigation command.
+- **ReactPAI**: `final_images/<clip>/<camera>/{0,1,2,3}.{png,jpg}` for `camera_cross_left_120fov`,
+  `camera_front_wide_120fov`, `camera_cross_right_120fov` and `camera_front_tele_30fov`. The original images, the
+  ego history (16 poses at 10 Hz) and the vehicle geometry come from the PAI-AV download;
+  `reactbench.datasets.paiav.PAIAVCompactRun` loads them (`edited_camera_paths`, `materialize_original_images`,
+  `ego_history`, `ego_vehicle_geometry`). There is no navigation command.
 - Both: `metadata/<token>.json` describes the inserted object (asset, placement, motion); the scorer reads it.
-
-### Output format
-
-Save one prediction per sample and scene:
-
-    <outputs></outputs>/predictions/<model></model>/<reactnav|reactpai>/original/trajectories/<token></token>.npz   # original scene
-    <outputs></outputs>/predictions/<model></model>/<reactnav|reactpai>/<run></run>/trajectories/<token></token>.npz      # edited scene
-
-Each `.npz` holds `trajectory`, a float array (N, 3) of rear-axle poses (x, y, heading) in the ego frame at
-the current frame (x forward, y left, heading in radians), where pose i is at time (i + 1) · dt, and
-`interval_length_s` = dt. It must cover at least 4 s; only the first 4 s are scored. The original and the edited
-prediction of a sample should use the same random numbers (`reactbench/models/seeds.py`).
-
-### Metrics
-
-Both predictions of a sample are evaluated in the edited scene with at-fault collision checks at 100 Hz on the
-piecewise-linear trajectory (paper section 3.2 and appendix). P = NC × DAC on ReactNAV and P = NC on ReactPAI;
-ΔP = P(edited prediction) − P(original prediction). ΔCS is the change in contact speed over the samples where
-both predictions collide, and TIR the share of samples whose two predictions differ by less than ε (ADE).
 
 ## Getting the data
 
@@ -72,20 +59,28 @@ both predictions collide, and TIR the share of samples whose two predictions dif
 
 ## Evaluating your model
 
-1. Save its predictions in the [output format](#output-format) for the original scenes and the 12 runs. The six
-   runners in `reactbench/models/` are worked examples: subclassing `reactbench.models.runner.Runner` gives the
-   run layout, paired seeds, failure handling and scoring (`models/drivewam/eval.py` is about 50 lines).
+1. Save one prediction per sample for the original scenes and the 12 runs, as
+   `<outputs>/predictions/<model>/<reactnav|reactpai>/<original|run>/trajectories/<token>.npz` with `trajectory`,
+   an (N, 3) float array of rear-axle poses (x forward, y left, heading in radians) in the ego frame at the current
+   frame, pose i at time (i + 1) · dt, and `interval_length_s` = dt. It must cover at least 4 s; the first 4 s are
+   scored. The original and the edited prediction of a sample should use the same random numbers. The six runners in
+   `reactbench/models/` are worked examples: subclassing `reactbench.models.runner.Runner` gives the run layout,
+   paired seeds, failure handling and scoring (`models/drivewam/eval.py` is about 50 lines).
 2. Score them (CPU; Python with the NAVSIM devkit for ReactNAV, `scoring_python` in `configs/paths.yaml`):
 
-   python -m reactbench.scoring outputs/predictions/<model></model>/reactnav [--workers 8]
-   python -m reactbench.scoring outputs/predictions/<model></model>/reactpai
+   ```bash
+   python -m reactbench.scoring outputs/predictions/<model>/reactnav [--workers 8]
+   python -m reactbench.scoring outputs/predictions/<model>/reactpai
+   ```
 
    Each run gets `metrics/*_at_fault_{per_sample,summary,manifest}.json`.
 3. Summarize, alone or next to the paper's models (their scored runs, from running them as in
    [Reproducing the paper](#reproducing-the-paper)):
 
-   python -m reactbench.summarize --models <model></model> --tables main tir
-   python -m reactbench.summarize --models alpamayo1_5 recogdrive <model></model> --tables main tir --by-speed
+   ```bash
+   python -m reactbench.summarize --models <model> --tables main tir
+   python -m reactbench.summarize --models alpamayo1_5 recogdrive <model> --tables main tir --by-speed
+   ```
 
 ## Reproducing the paper
 
@@ -136,14 +131,14 @@ dataset), then predicts and scores each run; outputs go to `<outputs>/prediction
 ```bash
 python -m reactbench.datasets.navsim_annotations data/reactnav/reactnav.yaml          # once (recogdrive env)
 for model in recogdrive drivewam autovla simwam alpamayo1_5 alpamayo2; do             # ReactNAV
-  python -m reactbench.models.$model.eval datasets/reactnav/car_timestep_1 --original
-  for run in datasets/reactnav/{crossing_pedestrian,standing_pedestrian,car}_timestep_?; do
+  python -m reactbench.models.$model.eval datasets/reactnav/car_tau0.5s --original
+  for run in datasets/reactnav/{crossing_pedestrian,standing_pedestrian,car}_tau*; do
     python -m reactbench.models.$model.eval $run
   done
 done
 for model in alpamayo1_5 alpamayo2; do                                                # ReactPAI
-  python -m reactbench.models.$model.eval datasets/reactpai/car_timestep_5 --dataset reactpai --original
-  for run in datasets/reactpai/*_timestep_*; do python -m reactbench.models.$model.eval $run --dataset reactpai; done
+  python -m reactbench.models.$model.eval datasets/reactpai/car_tau0.5s --dataset reactpai --original
+  for run in datasets/reactpai/*_tau*; do python -m reactbench.models.$model.eval $run --dataset reactpai; done
 done
 ```
 
@@ -165,8 +160,8 @@ The CoT analysis (section 4.3, appendix) runs on the ReactPAI runs at τ = 2.0 s
 ```bash
 for model in alpamayo1_5 alpamayo2; do
   for object in crossing_pedestrian standing_pedestrian car; do
-    python -m reactbench.analysis.cot.run_$model datasets/reactpai/${object}_timestep_20 --cot-swap
-    python -m reactbench.analysis.cot.run_$model datasets/reactpai/${object}_timestep_20 --fixed-cots
+    python -m reactbench.analysis.cot.run_$model datasets/reactpai/${object}_tau2.0s --cot-swap
+    python -m reactbench.analysis.cot.run_$model datasets/reactpai/${object}_tau2.0s --fixed-cots
   done
 done
 python -m reactbench.analysis.cot.summary                  # CoT summary figure (all look-ahead times)
@@ -195,7 +190,7 @@ objects can be placed at every look-ahead time); `composite.sh` renders 2,000 of
 in all 24 runs (`python -m reactbench.selection.reacttrain intersect`).
 
 **Generalization.** Unseen objects: `scripts/assets.sh animals <Rocketbox clone>`, then
-`scripts/composite_navsim.sh --animal --max-samples 300 standing_animal_timestep_$t $t` for t = 1-4, evaluated
+`scripts/composite_navsim.sh --animal --max-samples 300 $tau` for τ = 0.5, 1.0, 1.5 and 2.0 s, evaluated
 with `--config il` and `il_rt`. Real scenes (`data/real_scenes/navtest_v2.json`; its selection:
 `python -m reactbench.selection.real_scenes --output outputs/real_scenes/cohort.json` and
 `python -m reactbench.models.recogdrive.real_scenes build --cohort outputs/real_scenes/cohort.json`):
@@ -217,15 +212,13 @@ with `--config il` and `il_rt`. Real scenes (`data/real_scenes/navtest_v2.json`;
 scripts/download_checkpoints.sh depth                  # Depth Anything V2 Small, run offline by both compositors
 scripts/assets.sh humans <Microsoft-Rocketbox clone>   # Rocketbox 0943055
 scripts/assets.sh cars <openx-assets clone>            # OpenX 463ea3d
-for t in 1 2 3 4; do                                   # ReactNAV: tau = t x 0.5 s
-  scripts/composite_navsim.sh crossing_pedestrian_timestep_$t $t
-  scripts/composite_navsim.sh --standing standing_pedestrian_timestep_$t $t
-  scripts/composite_navsim.sh --car car_timestep_$t $t
-done
-for k in 5 10 15 20; do                                # ReactPAI: tau = k x 0.1 s
-  scripts/composite_paiav.sh crossing_pedestrian_timestep_$k $k
-  scripts/composite_paiav.sh --standing standing_pedestrian_timestep_$k $k
-  scripts/composite_paiav.sh --car car_timestep_$k $k
+for tau in 0.5 1.0 1.5 2.0; do                         # runs <object>_tau<tau>s, e.g. car_tau1.0s
+  scripts/composite_navsim.sh $tau                     # ReactNAV: crossing pedestrian
+  scripts/composite_navsim.sh --standing $tau
+  scripts/composite_navsim.sh --car $tau
+  scripts/composite_paiav.sh $tau                      # ReactPAI
+  scripts/composite_paiav.sh --standing $tau
+  scripts/composite_paiav.sh --car $tau
 done
 ```
 

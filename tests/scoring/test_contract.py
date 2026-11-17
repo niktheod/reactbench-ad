@@ -27,7 +27,7 @@ class OutputFormatTests(unittest.TestCase):
     def test_reactnav_predictions_without_bookkeeping(self):
         from reactbench.scoring.navsim import inventory_result
         with tempfile.TemporaryDirectory(prefix="test-contract-") as tmp:
-            run, bench = predictions(Path(tmp), "reactnav", "car_timestep_4", .5)
+            run, bench = predictions(Path(tmp), "reactnav", "car_tau2.0s", .5)
             with patch("reactbench.scoring.actor_motion.inserted_actor_motion", return_value=MOTION):
                 inventory = inventory_result(run, run_dir=bench)
             self.assertEqual(inventory["dataset"], "navsim")
@@ -42,7 +42,7 @@ class OutputFormatTests(unittest.TestCase):
     def test_reactpai_predictions_without_bookkeeping(self):
         from reactbench.scoring.paiav import inventory_result
         with tempfile.TemporaryDirectory(prefix="test-contract-") as tmp:
-            run, bench = predictions(Path(tmp), "reactpai", "car_timestep_20", .1)
+            run, bench = predictions(Path(tmp), "reactpai", "car_tau2.0s", .1)
             inventory = inventory_result(run, run_dir=bench)
             self.assertEqual(inventory["dataset"], "pai-av")
             self.assertEqual(Path(inventory["run_dir"]), bench.resolve())
@@ -53,7 +53,7 @@ class OutputFormatTests(unittest.TestCase):
     def test_short_predictions_are_rejected(self):
         from reactbench.scoring.results import inventory_result
         with tempfile.TemporaryDirectory(prefix="test-contract-") as tmp:
-            run, bench = predictions(Path(tmp), "reactnav", "car_timestep_4", .5)
+            run, bench = predictions(Path(tmp), "reactnav", "car_tau2.0s", .5)
             np.savez(run / "trajectories" / "t.npz", trajectory=np.zeros((4, 3)), interval_length_s=.5)
             with patch("reactbench.scoring.actor_motion.inserted_actor_motion", return_value=MOTION):
                 task, = inventory_result(run, run_dir=bench)["tasks"]

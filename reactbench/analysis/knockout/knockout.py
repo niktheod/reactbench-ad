@@ -37,7 +37,7 @@ DEFAULT_RESULTS_DIR = paths.outputs("knockout")
 # The released selection; ``select-tokens`` regenerates it from the original predictions.
 DEFAULT_TOKENS_FILE = paths.REPO_ROOT / "data" / "knockout" / "tokens.json"
 # Any ReactPAI run: only its original inputs are read, which every ReactPAI run shares.
-DEFAULT_RUN_DIR = paths.get("reactpai", "datasets/reactpai") / "crossing_pedestrian_timestep_20"
+DEFAULT_RUN_DIR = paths.get("reactpai", "datasets/reactpai") / "crossing_pedestrian_tau2.0s"
 # The original-scene predictions of the main evaluation; their CoTs must be reproduced exactly.
 ORIGINAL_PREDICTIONS = {model: paths.outputs("predictions", model, "reactpai", "original")
                         for model in MODEL_LABELS}

@@ -1,6 +1,6 @@
 """The released ReactNAV runs: packing them (authors) and completing them with the user's navtest images.
 
-A ReactNAV run ``<object>_timestep_<k>`` holds, per navtest token, the twelve model inputs
+A ReactNAV run ``<object>_tau<tau>s`` (e.g. ``car_tau1.0s``) holds, per navtest token, the twelve model inputs
 ``final_images/<token>/{CAM_L0,CAM_F0,CAM_R0}/{0,1,2,3}.{png,jpg}`` (frame 3 is the current frame, 0.5 s apart),
 the placement of the inserted object in ``metadata/<token>.json``, and ``run_config.json``. Only the frames that
 the object changes are released, as JPEGs with navtest's own settings (quality 80, 4:2:0 chroma subsampling); the
@@ -34,16 +34,9 @@ JPEG_OPTIONS = {"quality": 80, "subsampling": "4:2:0", "optimize": True}
 
 
 def released_runs(root):
-    """{released run name: run directory} of the insertion runs under ``root`` (old ``_contact_only`` names too)."""
-    found = {}
-    for run in sorted(Path(root).iterdir()):
-        parsed = parse_run_name(run.name, "navsim") if run.is_dir() else None
-        if parsed:
-            name = f"{parsed[0]}_timestep_{parsed[1]}"
-            if name in found:
-                raise ValueError(f"Two runs for {name} under {root}")
-            found[name] = run
-    return found
+    """{run name: run directory} of the insertion runs under ``root``."""
+    return {run.name: run for run in sorted(Path(root).iterdir())
+            if run.is_dir() and parse_run_name(run.name, "navsim")}
 
 
 def pack(source_root, output_root, *, runs=None, max_tokens=None):

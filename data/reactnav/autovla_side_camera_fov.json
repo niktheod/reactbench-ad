@@ -9,16 +9,16 @@
   "vertical": 0.2
  },
  "runs": {
-  "crossing_pedestrian_timestep_2": [
+  "crossing_pedestrian_tau1.0s": [
    "3ebe88aecd0c5d20"
   ],
-  "crossing_pedestrian_timestep_3": [
+  "crossing_pedestrian_tau1.5s": [
    "3ebe88aecd0c5d20",
    "cbf41000a2105ca1",
    "debb1dafdd77545e",
    "f71e5dcd9df85d97"
   ],
-  "crossing_pedestrian_timestep_4": [
+  "crossing_pedestrian_tau2.0s": [
    "205cce163e5a5b46",
    "27ff47ea8aea59cf",
    "3ebe88aecd0c5d20",

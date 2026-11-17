@@ -67,11 +67,9 @@ def with_side_cameras(agent_input, side_cameras):
 
 def side_camera_exclusions(run_name, path=FOV_EXCLUSIONS):
     """{token: reason} of a run's samples whose inserted object would enter CAM_L1/R1."""
-    parsed = parse_run_name(run_name, "navsim")
-    if parsed is None:
+    if parse_run_name(run_name, "navsim") is None:
         return {}
-    obj, k, _ = parsed
-    tokens = read_json(path)["runs"].get(f"{obj}_timestep_{k}", [])
+    tokens = read_json(path)["runs"].get(run_name, [])
     return {token: "inserted object in the field of view of CAM_L1/R1, which are not rendered" for token in tokens}
 
 

@@ -39,20 +39,17 @@ class EditedInputTest(unittest.TestCase):
 
 class ExclusionTest(unittest.TestCase):
     def test_released_list(self):
-        counts = {f"crossing_pedestrian_timestep_{k}": len(autovla.side_camera_exclusions(
-            f"crossing_pedestrian_timestep_{k}")) for k in (1, 2, 3, 4)}
-        self.assertEqual(counts, {"crossing_pedestrian_timestep_1": 0, "crossing_pedestrian_timestep_2": 1,
-                                  "crossing_pedestrian_timestep_3": 4, "crossing_pedestrian_timestep_4": 9})
-        self.assertEqual(autovla.side_camera_exclusions("crossing_pedestrian_timestep_4_contact_only"),
-                         autovla.side_camera_exclusions("crossing_pedestrian_timestep_4"))
-        self.assertEqual(autovla.side_camera_exclusions("car_timestep_4"), {})
+        counts = {tau: len(autovla.side_camera_exclusions(f"crossing_pedestrian_tau{tau}s"))
+                  for tau in ("0.5", "1.0", "1.5", "2.0")}
+        self.assertEqual(counts, {"0.5": 0, "1.0": 1, "1.5": 4, "2.0": 9})
+        self.assertEqual(autovla.side_camera_exclusions("car_tau2.0s"), {})
         self.assertEqual(autovla.side_camera_exclusions("original"), {})
 
     def test_file_lookup(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "fov.json"
-            path.write_text(json.dumps({"runs": {"standing_pedestrian_timestep_2": ["a", "b"]}}))
-            self.assertEqual(sorted(autovla.side_camera_exclusions("standing_pedestrian_timestep_2", path)),
+            path.write_text(json.dumps({"runs": {"standing_pedestrian_tau1.0s": ["a", "b"]}}))
+            self.assertEqual(sorted(autovla.side_camera_exclusions("standing_pedestrian_tau1.0s", path)),
                              ["a", "b"])
 
 
