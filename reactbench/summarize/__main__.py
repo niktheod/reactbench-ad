@@ -14,7 +14,9 @@ exploration_probe.
 Scored runs are found under ``<outputs>/predictions/<model>/<dataset>/`` (see ``runs.py``);
 ``--runs MODEL:DATASET=DIR`` overrides one location. ``--models`` selects the models of the benchmark tables
 (default: the six of the paper); any folder name under ``predictions/`` is a model. The other inputs are the outputs of their
-own commands (README): ``<outputs>/summaries/feasibility``, ``<outputs>/real_scenes``,
+own commands (``reactbench.scoring.feasibility``, ``reactbench.models.recogdrive.real_scenes``,
+``reactbench.analysis.knockout``, ``reactbench.analysis.exploration_probe``, ``scripts/navtest_pdms.sh``):
+``<outputs>/summaries/feasibility``, ``<outputs>/real_scenes``,
 ``<outputs>/knockout/summary.json``, ``<outputs>/exploration_probe`` and ``<outputs>/navtest_pdms``.
 Outputs go to ``<outputs>/summaries``.
 """

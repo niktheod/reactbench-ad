@@ -1,7 +1,7 @@
 """Inventory of a saved run: which predictions, insertions and pairs to score (read only).
 
 A predictions run is ``<model>/<reactnav|reactpai>/<run>/trajectories/<token>.npz`` next to
-``<model>/<dataset>/original/trajectories/<token>.npz`` (see README "Output format"). The runners also write
+``<model>/<dataset>/original/trajectories/<token>.npz`` (see README "Evaluating your model"). The runners also write
 ``metrics/summary.json`` and ``metrics/per_sample.json``, which name the benchmark run and the original
 predictions; without them, the benchmark run is passed in (``run_dir``) and the originals are the sibling
 ``original/``. CoT runs keep one directory per condition.

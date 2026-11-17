@@ -3,7 +3,7 @@
     python -m reactbench.scoring PREDICTIONS [PREDICTIONS ...] [--run RUN_DIR] [--workers N] [--output-root DIR]
 
 PREDICTIONS is one run of predictions, ``<model>/<reactnav|reactpai>/<run>`` holding
-``trajectories/<token>.npz`` (README "Output format"), or a folder of such runs, e.g.
+``trajectories/<token>.npz`` (README "Evaluating your model"), or a folder of such runs, e.g.
 ``<outputs>/predictions/<model>/reactnav``. The original-scene predictions are in the sibling ``original/``. The
 benchmark run defaults to ``<reactnav|reactpai>/<run>`` from configs/paths.yaml (``--run`` names it for a single
 run). Each run gets ``metrics/<navsim|paiav>_at_fault_{per_sample,summary,manifest}.json``, under
