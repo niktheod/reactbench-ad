@@ -1,7 +1,7 @@
 <h1 align="center">ReactBench-AD: Do Driving VLAs and World-Action Models React to Imminent Hazards in Their Path?</h1>
 
 <p align="center">
-  <a href="<arXiv link>">Paper</a>  | 
+  <a href="https://arxiv.org/abs/2611.20011">Paper</a>  | 
   <a href="<release link: ReactNAV>">Download</a>
 </p>
 
@@ -252,7 +252,15 @@ real-scenes selection.
 ## Citation
 
 ```bibtex
-<BibTeX>
+@misc{theodoridis2026reactbenchaddrivingvlasworldaction,
+      title={ReactBench-AD: Do Driving VLAs and World-Action Models React to Imminent Hazards in Their Path?}, 
+      author={Nikos Theodoridis and Reenu Mohandas and Sushil Sharma and Ciarán Hogan and Ganesh Sistu and Anthony Scanlan and Tim Brophy and Ciarán Eising},
+      year={2026},
+      eprint={2611.20011},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2611.20011}, 
+}
 ```
 
 ## Licences and acknowledgements
