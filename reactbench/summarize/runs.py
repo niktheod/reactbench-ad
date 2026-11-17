@@ -1,15 +1,15 @@
 """Locate scored runs.
 
 By default the runs of a model on a dataset are the run directories under
-``<outputs>/predictions/<model>/<dataset>/`` (one per inserted object and look-ahead time, plus
-``original``); ``--runs MODEL:DATASET=DIR`` points one (model, dataset) at another directory.
+``<outputs>/predictions/<model>/<dataset>/`` (one per variant, plus ``original``); ``--runs MODEL:DATASET=DIR``
+points one (model, dataset) at another directory.
 """
 from __future__ import annotations
 
 from pathlib import Path
 
 from .. import paths
-from ..runs import parse_run_name
+from ..variants import parse_variant_name
 from ..scoring.rows import read_rows
 
 DATASETS = {
@@ -52,7 +52,7 @@ class Runs:
         if not root.is_dir():
             return found
         for run in sorted(root.iterdir()):
-            parsed = parse_run_name(run.name, frame_dataset or DATASETS[dataset]["dataset"])
+            parsed = parse_variant_name(run.name, frame_dataset or DATASETS[dataset]["dataset"])
             if parsed and run.is_dir():
                 obj, _, tau = parsed
                 if (obj, tau) in found:

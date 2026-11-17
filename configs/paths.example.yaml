@@ -13,10 +13,10 @@ paiav_root: <PAI-AV download root>                         # PhysicalAI-Autonomo
 # navtest_pdms_metric_cache: outputs/work/metric_cache_navtest   # navtest metric cache of scripts/navtest_pdms.sh
 
 # --- ReactBench data (released, or regenerated with scripts/composite_*.sh) --------------------
-reactnav: datasets/reactnav                               # ReactNAV runs (and the standing-animal runs)
-reactpai: datasets/reactpai                               # regenerated ReactPAI runs
+reactnav: datasets/reactnav                               # ReactNAV variants (and the standing-animal ones)
+reactpai: datasets/reactpai                               # regenerated ReactPAI variants
 reactpai_manifest: data/reactpai/selection_manifest.json
-# reacttrain: datasets/reacttrain                         # the 24 ReactTrain runs
+# reacttrain: datasets/reacttrain                         # the 24 ReactTrain variants
 # reacttrain_work: outputs/reacttrain                     # caches, targets and views of the fine-tuning
 
 # --- Assets and tools ---------------------------------------------------------------------------

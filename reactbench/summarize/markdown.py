@@ -1,7 +1,7 @@
 """Markdown renderings of the summary tables (values as in the paper; '*' = 95% CI includes zero)."""
 from __future__ import annotations
 
-from ..runs import OBJECTS, OBJECT_LABELS
+from ..variants import OBJECTS, OBJECT_LABELS
 from .runs import DATASETS, LABELS
 from .stats import excludes_zero
 
@@ -77,7 +77,7 @@ def tir_table(records):
 
 
 def side_camera_table(data):
-    """AutoVLA with CAM_L1/R1 or CAM_L0/R0 as its front-left/right views: dP and dCS per run, TIR pooled over tau."""
+    """AutoVLA with CAM_L1/R1 or CAM_L0/R0 as its front-left/right views: dP and dCS per variant, TIR pooled over tau."""
     if not data:
         return ""
     from .benchmark import SIDE_CAMERA_MODELS
@@ -133,7 +133,7 @@ NAVTEST_COLUMNS = (("no_at_fault_collisions", "NC"), ("drivable_area_compliance"
 def fine_tuning_table(records, shortening=None):
     if not records:
         return ""
-    lines = ["### Fine-tuning on ReactTrain: ReactNAV (mean over the 12 runs) and navtest", "",
+    lines = ["### Fine-tuning on ReactTrain: ReactNAV (mean over the 12 variants) and navtest", "",
              "| Checkpoint | ΔP (pp) | ΔCS (km/h) | " + " | ".join(label for _, label in NAVTEST_COLUMNS) + " |",
              "|---|---:|---:|" + "---:|" * len(NAVTEST_COLUMNS)]
     for r in records:
@@ -168,7 +168,7 @@ def generalization_table(unseen, real):
                      f"{_f(s.get('p_pct'), 1, signed=False)} | {_f(s.get('cs_kmh'), 1, signed=False)} |")
     if unseen:
         lines.append("")
-        lines.append(f"Unseen objects: {next(iter(unseen.values()))['n_tokens']} scenes common to every animal run.")
+        lines.append(f"Unseen objects: {next(iter(unseen.values()))['n_tokens']} scenes common to every animal variant.")
     return "\n".join(lines)
 
 

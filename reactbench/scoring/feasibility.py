@@ -47,7 +47,7 @@ import numpy as np
 
 from .. import paths
 from ..io import digest, file_digest, read_json, write_json
-from ..runs import parse_run_name
+from ..variants import parse_variant_name
 from .at_fault import BEHIND_ANGLE_DEG, STOPPED_SPEED_MPS
 
 A_MAX_MPS2 = 8.0  # As the ReactTrain targets (paper §5): about the dry-road braking limit of a passenger car.
@@ -329,7 +329,7 @@ def collect(dataset, roots):
     spec = DATASETS[dataset]
     cells, sources, skipped = defaultdict(dict), {}, Counter()
     for run in discover_result_dirs(roots):
-        parsed = parse_run_name(run.name, spec["dataset"])
+        parsed = parse_variant_name(run.name, spec["dataset"])
         path = run / "metrics" / f"{spec['prefix']}_per_sample.json"
         if parsed is None or parsed[0] == "standing_animal" or not path.is_file():
             continue

@@ -1,12 +1,12 @@
 """Alpamayo 1.5 CoT interventions on ReactPAI (paper section 4.3 and appendix): CoT swap and fixed CoTs.
 
-    python -m reactbench.analysis.cot.run_alpamayo1_5 RUN_DIR --cot-swap     # O/E images x O/E CoTs
-    python -m reactbench.analysis.cot.run_alpamayo1_5 RUN_DIR --fixed-cots   # the five CoTs of fixed_cots.yaml
+    python -m reactbench.analysis.cot.run_alpamayo1_5 VARIANT_DIR --cot-swap     # O/E images x O/E CoTs
+    python -m reactbench.analysis.cot.run_alpamayo1_5 VARIANT_DIR --fixed-cots   # the five CoTs of fixed_cots.yaml
 
-Both build on the run's natural original and edited predictions (``python -m reactbench.models.alpamayo1_5.eval_paiav``:
+Both build on the variant's natural original and edited predictions (``python -m reactbench.models.alpamayo1_5.eval_paiav``:
 same configuration and per-token seeds; ``natural.py``) and force the CoT as Alpamayo 1.5's assistant prefix
 ``<|cot_start|>{cot}<|cot_end|><|traj_future_start|>`` (``models/alpamayo1_5/forced_cot.py``). Results go to
-``<outputs>/predictions/alpamayo1_5/reactpai/<run>_cot_swap`` and ``<run>_fixed_cots``.
+``<outputs>/predictions/alpamayo1_5/reactpai/<variant>_cot_swap`` and ``<variant>_fixed_cots``.
 """
 from __future__ import annotations
 

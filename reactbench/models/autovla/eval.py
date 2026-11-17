@@ -1,7 +1,7 @@
-"""Run AutoVLA on a ReactNAV run (three cameras, four history frames).
+"""Run AutoVLA on a ReactNAV variant (three cameras, four history frames).
 
-    python -m reactbench.models.autovla.eval RUN_DIR --original     # cache original predictions
-    python -m reactbench.models.autovla.eval RUN_DIR                # edited predictions + scoring
+    python -m reactbench.models.autovla.eval VARIANT_DIR --original     # cache original predictions
+    python -m reactbench.models.autovla.eval VARIANT_DIR                # edited predictions + scoring
 
 Inputs are AutoVLA's own per-token no-CoT samples (``autovla_inputs`` in configs/paths.yaml, made with AutoVLA's
 preprocessing). On NAVSIM, AutoVLA's released code reads the side cameras CAM_L1/R1 (``left/right_camera_paths``)
@@ -9,7 +9,7 @@ as its front-left and front-right views. The compositor renders CAM_F0/L0/R0 onl
 CAM_F0 frames (and the unused CAM_L0/R0 fields) are replaced, and CAM_L1/R1 stay original; the few samples whose
 inserted object would enter CAM_L1/R1 are skipped (``data/reactnav/autovla_side_camera_fov.json``). ``--config
 l0r0`` (``autovla_l0r0``, appendix) instead feeds CAM_L0/R0 as the two views, edited in edited runs, on every
-sample. The text output goes to ``cot_outputs/``. Predictions go to ``<outputs>/predictions/<name>/reactnav/<run>``.
+sample. The text output goes to ``cot_outputs/``. Predictions go to ``<outputs>/predictions/<name>/reactnav/<variant>``.
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ import torch
 
 from ... import paths
 from ...io import read_json
-from ...runs import parse_run_name
+from ...variants import parse_variant_name
 from .. import runner
 from ..seeds import paired_seed
 
@@ -65,11 +65,11 @@ def with_side_cameras(agent_input, side_cameras):
     return agent_input
 
 
-def side_camera_exclusions(run_name, path=FOV_EXCLUSIONS):
-    """{token: reason} of a run's samples whose inserted object would enter CAM_L1/R1."""
-    if parse_run_name(run_name, "navsim") is None:
+def side_camera_exclusions(variant_name, path=FOV_EXCLUSIONS):
+    """{token: reason} of a variant's samples whose inserted object would enter CAM_L1/R1."""
+    if parse_variant_name(variant_name, "navsim") is None:
         return {}
-    tokens = read_json(path)["runs"].get(run_name, [])
+    tokens = read_json(path)["runs"].get(variant_name, [])
     return {token: "inserted object in the field of view of CAM_L1/R1, which are not rendered" for token in tokens}
 
 
@@ -119,7 +119,7 @@ class AutoVLA(runner.Runner):
 
     def excluded_tokens(self):
         # With CAM_L0/R0 every view that shows the object is rendered.
-        return side_camera_exclusions(self.run_dir.name) if self.side_cameras == "l1r1" else {}
+        return side_camera_exclusions(self.variant_dir.name) if self.side_cameras == "l1r1" else {}
 
     def predict(self, token, seeds):
         agent_input = read_json(self.inputs / f"{token}.json")

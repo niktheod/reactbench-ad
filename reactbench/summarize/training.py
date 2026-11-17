@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 
 from .. import paths
-from ..runs import OBJECTS, TAUS_S
+from ..variants import OBJECTS, TAUS_S
 from ..scoring.reporting import comparison_summary, pair_records
 from .runs import DATASETS
 
@@ -79,7 +79,7 @@ def training_stages(runs, tau_s=2.0):
 
 
 def _mean_over_runs(runs, name, objects, taus=TAUS_S, tokens=None):
-    """Mean over the (object, tau) runs of each run's dP (pp) and contact-speed change (km/h)."""
+    """Mean over the (object, tau) variants of dP (pp) and the contact-speed change (km/h)."""
     deltas, contacts, used = [], [], []
     for obj in objects:
         for tau in taus:
@@ -118,7 +118,7 @@ def navtest_pdms(name):
 
 
 def fine_tuning(runs, checkpoints=("recogdrive_il", "recogdrive_il_rt")):
-    """ReactNAV dP / dCS (mean over the 12 runs) and navtest PDMS of IL and IL + RT."""
+    """ReactNAV dP / dCS (mean over the 12 variants) and navtest PDMS of IL and IL + RT."""
     return [{"checkpoint": name, **_mean_over_runs(runs, name, OBJECTS), "navtest": navtest_pdms(name)}
             for name in checkpoints]
 
@@ -163,7 +163,7 @@ def original_plan_shortening(runs, checkpoints=("recogdrive_il", "recogdrive_il_
 
 
 def unseen_objects(runs, checkpoints=("recogdrive_il", "recogdrive_il_rt")):
-    """Standing animals: mean over tau on the tokens present in every animal run of every checkpoint."""
+    """Standing animals: mean over tau on the tokens present in every animal variant for every checkpoint."""
     token_sets = []
     for name in checkpoints:
         for tau in TAUS_S:

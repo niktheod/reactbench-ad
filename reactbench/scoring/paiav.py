@@ -73,15 +73,15 @@ def at_fault_fingerprint(config):
                    "code": {name: file_digest(here / name) for name in ("at_fault.py", "ade.py", "paiav.py")}})
 
 
-def inventory_result(root, *, run_dir=None):
-    inventory = saved.inventory_result(root, run_dir=run_dir)
+def inventory_result(root, *, variant_dir=None):
+    inventory = saved.inventory_result(root, variant_dir=variant_dir)
     root = Path(root)
     summary = read_json(root / "metrics/summary.json", {})
     manifest = read_json(root / "evaluation_manifest.json", {})
     identity = summary.get("identity", manifest.get("identity", {}))
-    run = summary.get("run_dir", identity.get("run_dir", manifest.get("source_run_dir")))
-    inventory["run_dir"] = (str(Path(run_dir).resolve()) if run_dir else
-                            str((root / run).resolve()) if run else None)
+    recorded = summary.get("run_dir", identity.get("run_dir", manifest.get("source_run_dir")))
+    inventory["run_dir"] = (str(Path(variant_dir).resolve()) if variant_dir else
+                            str((root / recorded).resolve()) if recorded else None)
     records = {str(r["token"]): r for r in read_json(root / "metrics/per_sample.json", [])}
     for task in inventory["tasks"]:
         if inventory["dataset"] != "pai-av":
@@ -285,14 +285,14 @@ def summarize(rows):
             "overall": aggregate(rows), "groups": groups}
 
 
-def process_result(root, config, *, tokens=None, output_root=None, run_dir=None):
+def process_result(root, config, *, tokens=None, output_root=None, variant_dir=None):
     """Score one run; write metrics under ``output_root`` (default: the run itself).
 
-    ``run_dir``: the benchmark run, for predictions saved without the runners' bookkeeping.
+    ``variant_dir``: the benchmark variant, for predictions saved without the runners' bookkeeping.
     """
-    from ..datasets.paiav import PAIAVCompactRun
+    from ..datasets.paiav import PAIAVCompactVariant
     root = Path(root).resolve()
-    inventory = inventory_result(root, run_dir=run_dir)
+    inventory = inventory_result(root, variant_dir=variant_dir)
     if inventory["mode"] == "original":
         return {"status": "inapplicable", "result_dir": str(root), "mode": "original"}
     tasks = inventory["tasks"]
@@ -307,11 +307,11 @@ def process_result(root, config, *, tokens=None, output_root=None, run_dir=None)
     try:
         if any(t["status"] == "ready" for t in tasks):
             try:
-                loader = PAIAVCompactRun(inventory["run_dir"], validate_archive_members=False)
+                loader = PAIAVCompactVariant(inventory["run_dir"], validate_archive_members=False)
             except Exception as exc:
                 for task in tasks:
                     if task["status"] == "ready":
-                        task.update(status="failed", reason=f"Source run unavailable: {exc}")
+                        task.update(status="failed", reason=f"Source variant unavailable: {exc}")
         for i, task in enumerate(tasks, 1):
             rows.append(_row(task, loader, worlds, config, contract))
             if i % 50 == 0:

@@ -13,7 +13,7 @@ from typing import Any
 
 import numpy as np
 
-from ...datasets.navsim import NAVSIMRun
+from ...datasets.navsim import NAVSIMVariant
 
 NAVIGATION_TEXT = {
     (1, 0, 0, 0): "Turn left at the next opportunity.",
@@ -99,8 +99,8 @@ def navsim_ego_history(past_trajectory: Any, current_timestamp_us: int = 0) -> d
 
 @contextmanager
 def model_input(loader, token: str, *, original: bool):
-    """The Alpamayo 1.5 input of one sample of a ``NAVSIMRun`` or ``PAIAVCompactRun``."""
-    if isinstance(loader, NAVSIMRun):
+    """The Alpamayo 1.5 input of one sample of a ``NAVSIMVariant`` or ``PAIAVCompactVariant``."""
+    if isinstance(loader, NAVSIMVariant):
         annotation = loader.annotation(token)
         yield {"camera_paths": loader.original_images(token) if original else loader.edited_images(token),
                "alpamayo_ego_history": navsim_ego_history(annotation["past_trajectory"]),

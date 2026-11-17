@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .. import paths
 from ..io import read_json
-from ..runs import OBJECTS
+from ..variants import OBJECTS
 from .benchmark import own_pairs
 from .runs import MODELS
 from .stats import bootstrap_mean

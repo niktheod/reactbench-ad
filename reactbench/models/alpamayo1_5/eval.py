@@ -1,7 +1,7 @@
-"""Run Alpamayo 1.5 on a ReactNAV or ReactPAI run: original and edited scenes.
+"""Run Alpamayo 1.5 on a ReactNAV or ReactPAI variant: original and edited scenes.
 
-    python -m reactbench.models.alpamayo1_5.eval RUN_DIR [--dataset reactpai] --original   # cache originals
-    python -m reactbench.models.alpamayo1_5.eval RUN_DIR [--dataset reactpai]              # edited + scoring
+    python -m reactbench.models.alpamayo1_5.eval VARIANT_DIR [--dataset reactpai] --original   # cache originals
+    python -m reactbench.models.alpamayo1_5.eval VARIANT_DIR [--dataset reactpai]              # edited + scoring
 
 (``eval_navsim``/``eval_paiav`` are the same with the dataset preset.) ReactNAV: the front-left, front and
 front-right cameras stand in for the cross-left, front-wide and cross-right cameras (frames 0.5 s apart instead of

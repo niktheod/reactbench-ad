@@ -36,8 +36,8 @@ DEFAULT_OUTPUT_ROOT = paths.outputs("knockout", "rollouts")
 DEFAULT_RESULTS_DIR = paths.outputs("knockout")
 # The released selection; ``select-tokens`` regenerates it from the original predictions.
 DEFAULT_TOKENS_FILE = paths.REPO_ROOT / "data" / "knockout" / "tokens.json"
-# Any ReactPAI run: only its original inputs are read, which every ReactPAI run shares.
-DEFAULT_RUN_DIR = paths.get("reactpai", "datasets/reactpai") / "crossing_pedestrian_tau2.0s"
+# Any ReactPAI variant: only its original inputs are read, which every ReactPAI variant shares.
+DEFAULT_VARIANT_DIR = paths.get("reactpai", "datasets/reactpai") / "crossing_pedestrian_tau2.0s"
 # The original-scene predictions of the main evaluation; their CoTs must be reproduced exactly.
 ORIGINAL_PREDICTIONS = {model: paths.outputs("predictions", model, "reactpai", "original")
                         for model in MODEL_LABELS}
@@ -56,11 +56,11 @@ META_INTEGERS = (
 def build_parser(*, description: str, default_config: Path) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
-        "run_dir",
+        "variant_dir",
         type=Path,
         nargs="?",
-        default=DEFAULT_RUN_DIR,
-        help="ReactPAI run supplying the tokens; only original inputs are read.",
+        default=DEFAULT_VARIANT_DIR,
+        help="ReactPAI variant supplying the tokens; only original inputs are read.",
     )
     parser.add_argument("--config", type=Path, default=default_config)
     parser.add_argument(
@@ -84,7 +84,7 @@ def validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> 
         parser.error("--max-samples must be positive")
 
 
-def select_run_tokens(available: Sequence[str], args: argparse.Namespace) -> list[str]:
+def select_variant_tokens(available: Sequence[str], args: argparse.Namespace) -> list[str]:
     tokens = select_tokens(list(available), args.tokens_file)
     return tokens if args.max_samples is None else tokens[: args.max_samples]
 
@@ -260,7 +260,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         "select-tokens",
         help="Draw the tokens shared by both models from their original-scene ReactPAI predictions.",
     )
-    select.add_argument("--run-dir", type=Path, default=DEFAULT_RUN_DIR)
+    select.add_argument("--variant-dir", type=Path, default=DEFAULT_VARIANT_DIR)
     select.add_argument("--count", type=int, default=DEFAULT_SAMPLE_COUNT)
     select.add_argument("--seed", type=int, default=DEFAULT_SELECTION_SEED)
     select.add_argument("--output", type=Path, default=DEFAULT_RESULTS_DIR / "tokens.json")
@@ -268,7 +268,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = parser.parse_args(argv)
     document = write_token_selection(
         args.output,
-        run_dir=args.run_dir,
+        variant_dir=args.variant_dir,
         prediction_dirs=ORIGINAL_PREDICTIONS,
         count=args.count,
         seed=args.seed,

@@ -95,8 +95,8 @@ def postprocess_evaluation(result_dir, mode="score", workers=1):
         write_json(Path(result_dir) / f"metrics/{PREFIX}_error.json", {"status": "failed", "error": str(exc)})
 
 
-def inventory_result(root, *, run_dir=None, dataset=None):
-    inventory = saved.inventory_result(root, run_dir=run_dir, dataset=dataset)
+def inventory_result(root, *, variant_dir=None, dataset=None):
+    inventory = saved.inventory_result(root, variant_dir=variant_dir, dataset=dataset)
     for task in inventory["tasks"]:
         if task["dataset"] != "navsim":
             task.update(status="inapplicable", reason="ReactNAV scoring requires a NAVSIM scene")
@@ -195,15 +195,15 @@ def score_task(task, worlds, config, contract):
     return row
 
 
-def process_result(root, config, *, output_root=None, backend=backend_call, run_dir=None):
+def process_result(root, config, *, output_root=None, backend=backend_call, variant_dir=None):
     """Score one run; write metrics under ``output_root`` (default: the run itself).
 
-    ``run_dir``: the benchmark run, for predictions saved without the runners' bookkeeping.
+    ``variant_dir``: the benchmark variant, for predictions saved without the runners' bookkeeping.
     """
     from .rows import read_rows
     root = Path(root).resolve()
     output_root = Path(output_root).resolve() if output_root else root
-    inventory = inventory_result(root, run_dir=run_dir)
+    inventory = inventory_result(root, variant_dir=variant_dir)
     if inventory["dataset"] != "navsim" or inventory["mode"] == "original":
         return {"status": "inapplicable", "result_dir": str(root), "dataset": inventory["dataset"],
                 "mode": inventory["mode"]}

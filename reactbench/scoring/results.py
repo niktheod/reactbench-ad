@@ -1,9 +1,9 @@
 """Inventory of a saved run: which predictions, insertions and pairs to score (read only).
 
-A predictions run is ``<model>/<reactnav|reactpai>/<run>/trajectories/<token>.npz`` next to
+A predictions run is ``<model>/<reactnav|reactpai>/<variant>/trajectories/<token>.npz`` next to
 ``<model>/<dataset>/original/trajectories/<token>.npz`` (see README "Evaluating your model"). The runners also write
-``metrics/summary.json`` and ``metrics/per_sample.json``, which name the benchmark run and the original
-predictions; without them, the benchmark run is passed in (``run_dir``) and the originals are the sibling
+``metrics/summary.json`` and ``metrics/per_sample.json``, which name the benchmark variant and the original
+predictions; without them, the benchmark variant is passed in (``variant_dir``) and the originals are the sibling
 ``original/``. CoT runs keep one directory per condition.
 """
 from __future__ import annotations
@@ -119,10 +119,10 @@ def _put_predictions(target, condition, path, dt):
 DATASET_FOLDERS = {"reactnav": "navsim", "reactpai": "pai-av"}
 
 
-def inventory_result(result_dir, *, run_dir=None, dataset=None):
+def inventory_result(result_dir, *, variant_dir=None, dataset=None):
     """Read only: resolve every saved/expected sample into a scoring request.
 
-    ``run_dir``: the benchmark run (default: the one the run's bookkeeping names). ``dataset``: "navsim" or
+    ``variant_dir``: the benchmark variant (default: the one the run's bookkeeping names). ``dataset``: "navsim" or
     "pai-av" (default: from the parent folder, ``reactnav`` or ``reactpai``).
     """
     root = Path(result_dir).resolve()
@@ -142,8 +142,9 @@ def inventory_result(result_dir, *, run_dir=None, dataset=None):
         dataset_text = " ".join(str(v) for v in (summary.get("dataset", ""), signature.get("evaluator", ""),
                        signature.get("source", {}).get("dataset", ""), identity.get("backend", "")))
         dataset = "pai-av" if ("pai" in dataset_text.lower() or "alpamayo" in root.parts) else "navsim"
-    run_value = summary.get("run_dir", identity.get("run_dir", manifest.get("source_run_dir")))
-    run_dir = Path(run_dir).resolve() if run_dir else (_path(run_value, root) if run_value else None)
+    variant_value = summary.get("run_dir", identity.get("run_dir", manifest.get("source_run_dir")))
+    variant_dir = (Path(variant_dir).resolve() if variant_dir
+                   else _path(variant_value, root) if variant_value else None)
     dt = summary.get("interval_length_s", signature.get("interval_length_s"))
     sources = {str(p): file_digest(p) for p in (root / "metrics/summary.json",
                root / "metrics/per_sample.json", root / "evaluation_manifest.json") if p.is_file()}
@@ -202,7 +203,7 @@ def inventory_result(result_dir, *, run_dir=None, dataset=None):
             metadata_value = row.get("placement_metadata_path", row.get("metadata_path",
                                  row.get("provenance", {}).get("metadata_path")))
             metadata_path = (_path(metadata_value, root) if metadata_value else
-                             run_dir / "metadata" / f"{token}.json" if run_dir else None)
+                             variant_dir / "metadata" / f"{token}.json" if variant_dir else None)
             motion = row.get("actor_motion")
             if metadata_path and metadata_path.is_file() and dataset == "navsim":
                 from .actor_motion import inserted_actor_motion

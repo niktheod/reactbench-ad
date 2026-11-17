@@ -1,7 +1,7 @@
-"""Run Alpamayo 2 on a ReactNAV or ReactPAI run: original and edited scenes.
+"""Run Alpamayo 2 on a ReactNAV or ReactPAI variant: original and edited scenes.
 
-    python -m reactbench.models.alpamayo2.eval RUN_DIR [--dataset reactpai] --original   # cache originals
-    python -m reactbench.models.alpamayo2.eval RUN_DIR [--dataset reactpai]              # edited + scoring
+    python -m reactbench.models.alpamayo2.eval VARIANT_DIR [--dataset reactpai] --original   # cache originals
+    python -m reactbench.models.alpamayo2.eval VARIANT_DIR [--dataset reactpai]              # edited + scoring
 
 (``eval_navsim``/``eval_paiav`` are the same with the dataset preset.) ReactNAV: the three recorded cameras at 2 Hz
 and the interpolated 10 Hz ego history (``navsim_loader.py``). ReactPAI: NVIDIA's six-camera profile, the two rear
@@ -40,12 +40,12 @@ class Alpamayo2(runner.Runner):
     config_dir = HERE
     default_config = "config"
 
-    def open_run(self):
+    def open_variant(self):
         if self.dataset == "reactnav":
-            from .navsim_loader import NAVSIMRun
-            return NAVSIMRun(self.run_dir)
-        from .paiav_loader import PAIAVRun
-        return PAIAVRun(self.run_dir)
+            from .navsim_loader import NAVSIMVariant
+            return NAVSIMVariant(self.variant_dir)
+        from .paiav_loader import PAIAVVariant
+        return PAIAVVariant(self.variant_dir)
 
     def setup(self):
         if self.config.get("_target_") != TARGET:

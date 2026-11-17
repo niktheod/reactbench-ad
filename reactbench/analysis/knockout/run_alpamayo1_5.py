@@ -21,7 +21,7 @@ from .knockout import (
     build_parser,
     run_conditions,
     saved_reasoning,
-    select_run_tokens,
+    select_variant_tokens,
     validate_args,
 )
 
@@ -39,18 +39,18 @@ def main(argv: Sequence[str] | None = None) -> None:
     validate_args(parser, args)
     from hydra.utils import instantiate
 
-    from ...datasets.paiav import PAIAVCompactRun
+    from ...datasets.paiav import PAIAVCompactVariant
     from ...models.alpamayo1_5.eval import SEED_NAMESPACE
     from ...models.alpamayo1_5.inputs import model_input
     from ...models.seeds import paired_seed
 
-    run_dir = resolve_directory(args.run_dir, "run directory")
+    variant_dir = resolve_directory(args.variant_dir, "variant directory")
     config_path = resolve_file(args.config, "Alpamayo 1.5 configuration")
     cfg = load_yaml_mapping(config_path)
     seed_base = int(cfg.get("diffusion_seed_base", 42))
 
-    with PAIAVCompactRun(run_dir) as loader:
-        tokens = select_run_tokens(list(loader.tokens), args)
+    with PAIAVCompactVariant(variant_dir) as loader:
+        tokens = select_variant_tokens(list(loader.tokens), args)
         agent = instantiate(cfg)
         agent.initialize()
         model = agent.model
@@ -84,7 +84,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 model=MODEL,
                 dataset="pai-av",
                 inputs="original",
-                run_dir=run_dir.name,
+                run_dir=variant_dir.name,  # key kept for existing results
                 config=config_path.name,
                 vlm_seed=int(agent.seed),
                 diffusion_seed=int(natural_seed),

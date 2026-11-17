@@ -1,4 +1,4 @@
-"""Reuse compact-run archive decoding and native PAI-AV egomotion/geometry.
+"""Reuse the ReactPAI variant loader's archive decoding and native PAI-AV egomotion/geometry.
 
 Inputs follow NVIDIA's six-camera trajectory profile: the four edited cameras
 plus rear-left/right frames decoded from the unedited source archives for both
@@ -18,7 +18,7 @@ import tempfile
 import numpy as np
 
 from ...io import digest
-from ...datasets.paiav import CAMERA_NAMES, CameraSource, PAIAVCompactRun, PAIAVContractError
+from ...datasets.paiav import CAMERA_NAMES, CameraSource, PAIAVCompactVariant, PAIAVContractError
 from ...scoring.actor_motion import actor_motion_from_metadata
 from ...scoring.actor_motion import actor_footprint_corners
 from ...compositing.paiav.paiav_io import _nearest_unique_indices, _pose_matrix
@@ -78,7 +78,7 @@ def _actor_height(motion: dict) -> float:
     return float(motion.get("height_m", 2.0))
 
 
-class PAIAVRun(PAIAVCompactRun):
+class PAIAVVariant(PAIAVCompactVariant):
     camera_profile = {"camera_names": [name for name, _ in MODEL_CAMERAS],
                       "camera_ids": [index for _, index in MODEL_CAMERAS],
                       "edited_cameras": list(CAMERA_NAMES),
@@ -90,8 +90,8 @@ class PAIAVRun(PAIAVCompactRun):
                                       "whose inserted actor projects into a rear view are excluded",
                       "shift": "none: NVIDIA's six-camera trajectory profile"}
 
-    def __init__(self, run_dir, **kwargs):
-        super().__init__(run_dir, **kwargs)
+    def __init__(self, variant_dir, **kwargs):
+        super().__init__(variant_dir, **kwargs)
         self._rear_source_cache: dict[str, dict[str, CameraSource]] = {}
         self._rear_calibration_cache: dict[str, dict] = {}
 

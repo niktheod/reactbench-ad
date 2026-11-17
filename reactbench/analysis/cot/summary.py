@@ -1,6 +1,6 @@
 """Effect of the inserted objects on the Alpamayo CoTs on ReactPAI (paper figure "CoT summary").
 
-Per model and object, pooled over the four look-ahead times, on the clips scored in all 12 runs of the model:
+Per model and object, pooled over the four look-ahead times, on the clips scored in all 12 variants for the model:
 the distribution of the CoT's leading action (slow/stop = stop, yield or slow down; keep distance; other) for
 the edited scenes and for the original scenes, the share of edited-scene CoTs that differ from the
 original-scene CoT of the same clip, and the share that names the object (a pedestrian or, for cars, a
@@ -17,7 +17,7 @@ from collections import Counter
 from pathlib import Path
 
 from ...io import write_json
-from ...runs import OBJECTS, run_name
+from ...variants import OBJECTS, variant_name
 from ...summarize.runs import Runs
 
 MODELS = ("alpamayo1_5", "alpamayo2")
@@ -78,9 +78,9 @@ def shares(actions, n):
 
 
 def model_texts(runs, model):
-    """{run: [first CoT per clip]} for the original scenes and the 12 runs, on the clips common to all runs."""
+    """{variant: [first CoT per clip]} for the original scenes and the 12 variants, on the clips common to all."""
     root = runs.directory(model, "reactpai")
-    names_ = [run_name(obj, tau, "pai-av") for obj in OBJECTS for tau in TAUS_S]
+    names_ = [variant_name(obj, tau, "pai-av") for obj in OBJECTS for tau in TAUS_S]
     cohorts = [{str(r["token"]) for r in runs.rows(root / name, "reactpai")} for name in names_]
     common = sorted(set.intersection(*cohorts))
     return {name: [read_cot(root / name / "reasoning" / f"{token}.json") for token in common]
@@ -93,7 +93,7 @@ def summary(runs, models=MODELS):
         texts, n_clips = model_texts(runs, model)
         original = texts["original"]
         for obj in OBJECTS:
-            edited = [t for tau in TAUS_S for t in texts[run_name(obj, tau, "pai-av")]]
+            edited = [t for tau in TAUS_S for t in texts[variant_name(obj, tau, "pai-av")]]
             originals = original * len(TAUS_S)
             records.append({
                 "model": model, "object": obj, "clips": n_clips, "edited_cots": len(edited),

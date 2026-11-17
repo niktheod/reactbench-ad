@@ -1,7 +1,7 @@
-"""Run Alpamayo 2 on a ReactNAV run: original and edited scenes (``eval.py`` with ``--dataset reactnav``).
+"""Run Alpamayo 2 on a ReactNAV variant: original and edited scenes (``eval.py`` with ``--dataset reactnav``).
 
-    python -m reactbench.models.alpamayo2.eval_navsim RUN_DIR --original    # cache original predictions
-    python -m reactbench.models.alpamayo2.eval_navsim RUN_DIR               # edited predictions + scoring
+    python -m reactbench.models.alpamayo2.eval_navsim VARIANT_DIR --original    # cache original predictions
+    python -m reactbench.models.alpamayo2.eval_navsim VARIANT_DIR               # edited predictions + scoring
 """
 from .eval import Alpamayo2
 

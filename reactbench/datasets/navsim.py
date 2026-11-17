@@ -1,10 +1,10 @@
-"""Loader for ReactNAV runs: edited frames, inserted objects and the NAVSIM annotations of their scenes.
+"""Loader for ReactNAV variants: edited frames, inserted objects and the NAVSIM annotations of their scenes.
 
-A ReactNAV run (``reactbench.datasets.reactnav``) holds ``final_images/<token>/{CAM_L0,CAM_F0,CAM_R0}/{0..3}.{png,jpg}``
+A ReactNAV variant (``reactbench.datasets.reactnav``) holds ``final_images/<token>/{CAM_L0,CAM_F0,CAM_R0}/{0..3}.{png,jpg}``
 (0.5 s apart, frame 3 is the current frame), ``metadata/<token>.json`` (the inserted object) and
 ``run_config.json``. The original images, ego history and driving command of each token come from the NAVSIM
-annotations of the run's scene filter (``reactbench.datasets.navsim_annotations``), the NAVSIM logs from
-``configs/paths.yaml``. The ReactPAI counterpart is ``reactbench.datasets.paiav.PAIAVCompactRun``.
+annotations of the variant's scene filter (``reactbench.datasets.navsim_annotations``), the NAVSIM logs from
+``configs/paths.yaml``. The ReactPAI counterpart is ``reactbench.datasets.paiav.PAIAVCompactVariant``.
 """
 from __future__ import annotations
 
@@ -30,23 +30,23 @@ def checked_token(token):
 
 
 def annotations_path(run_config):
-    """The NAVSIM annotations of a run's scene filter: ``<annotations>/<scene filter stem>.json``."""
+    """The NAVSIM annotations of a variant's scene filter: ``<annotations>/<scene filter stem>.json``."""
     path = paths.get("annotations", paths.outputs("annotations")) / f"{Path(run_config['scene_filter']).stem}.json"
     if not path.is_file():
         raise FileNotFoundError(f"NAVSIM annotations do not exist: {path} (reactbench.datasets.navsim_annotations)")
     return path.resolve()
 
 
-class NAVSIMRun:
-    """Validated access to one ReactNAV run (a context manager, like ``PAIAVCompactRun``)."""
+class NAVSIMVariant:
+    """Validated access to one ReactNAV variant (a context manager, like ``PAIAVCompactVariant``)."""
 
-    def __init__(self, run_dir, *, annotations=None):
-        self.run_dir = Path(run_dir).expanduser().resolve()
-        self.final_images_dir = (self.run_dir / "final_images").resolve()
-        self.metadata_dir = self.run_dir / "metadata"
+    def __init__(self, variant_dir, *, annotations=None):
+        self.variant_dir = Path(variant_dir).expanduser().resolve()
+        self.final_images_dir = (self.variant_dir / "final_images").resolve()
+        self.metadata_dir = self.variant_dir / "metadata"
         if not self.final_images_dir.is_dir() or not self.metadata_dir.is_dir():
-            raise NotADirectoryError(f"A ReactNAV run needs final_images/ and metadata/: {self.run_dir}")
-        self.run_config_path = self.run_dir / "run_config.json"
+            raise NotADirectoryError(f"A ReactNAV variant needs final_images/ and metadata/: {self.variant_dir}")
+        self.run_config_path = self.variant_dir / "run_config.json"
         self.run_config = read_json(self.run_config_path)
         if not isinstance(self.run_config, dict) or not self.run_config.get("scene_filter"):
             raise ValueError(f"Expected a JSON object with a scene_filter: {self.run_config_path}")
@@ -81,7 +81,7 @@ class NAVSIMRun:
                 by_token[token] = record
             missing = sorted(set(self.tokens) - set(by_token))
             if missing:
-                raise ValueError(f"{len(missing)} tokens of the run are not in {self.annotations_path}: {missing[:5]}")
+                raise ValueError(f"{len(missing)} tokens of the variant are not in {self.annotations_path}: {missing[:5]}")
             self._annotations = by_token
         return self._annotations
 

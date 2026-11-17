@@ -1,8 +1,8 @@
-"""Loader for compact ReactPAI compositor runs (edited images, annotations, original sources).
+"""Loader for ReactPAI variants, the compacted compositor output (edited images, annotations, original sources).
 
 Original camera histories are decoded on demand from the downloaded PAI-AV
 chunk archives into a temporary directory. Edited histories always come from
-the compact run's ``final_images`` tree; compositor intermediates are never
+the variant's ``final_images`` tree; compositor intermediates are never
 used as model inputs.
 """
 
@@ -56,7 +56,7 @@ SUPPORTED_SOURCE_INDEX_VERSIONS = frozenset(
 
 
 class PAIAVContractError(RuntimeError):
-    """Raised when a compact run cannot satisfy the evaluation contract."""
+    """Raised when a variant cannot satisfy the evaluation contract."""
 
 
 @dataclass(frozen=True)
@@ -226,7 +226,7 @@ def _pose_matrices(egomotion: Any, timestamps_us: np.ndarray) -> np.ndarray:
 def build_alpamayo_ego_history(
     raw_egomotion: Any, current_timestamp_us: int
 ) -> dict[str, Any]:
-    """Reconstruct the native history used by legacy compact runs."""
+    """Reconstruct the native history used by legacy compacted variants."""
 
     current_timestamp_us = int(current_timestamp_us)
     timestamps = current_timestamp_us + HISTORY_INTERVAL_US * np.arange(
@@ -364,31 +364,31 @@ def validate_ego_vehicle_geometry(
 FrameDecoder = Callable[[Path, str, Sequence[int], Sequence[Path]], None]
 
 
-class PAIAVCompactRun:
-    """Validated access to one compact PAI-AV compositor run."""
+class PAIAVCompactVariant:
+    """Validated access to one ReactPAI variant (compacted compositor output)."""
 
     def __init__(
         self,
-        run_dir: Path,
+        variant_dir: Path,
         *,
         frame_decoder: FrameDecoder = decode_archive_video_frames,
         validate_archive_members: bool = True,
     ) -> None:
-        self.run_dir = Path(run_dir).expanduser().resolve()
-        if not self.run_dir.is_dir():
-            raise NotADirectoryError(f"PAI-AV run directory does not exist: {self.run_dir}")
+        self.variant_dir = Path(variant_dir).expanduser().resolve()
+        if not self.variant_dir.is_dir():
+            raise NotADirectoryError(f"ReactPAI variant directory does not exist: {self.variant_dir}")
         self.frame_decoder = frame_decoder
-        self.final_images_dir = self.run_dir / "final_images"
-        self.metadata_dir = self.run_dir / "metadata"
+        self.final_images_dir = self.variant_dir / "final_images"
+        self.metadata_dir = self.variant_dir / "metadata"
         if not self.final_images_dir.is_dir() or not self.metadata_dir.is_dir():
             raise PAIAVContractError(
-                "Compact run must contain final_images/ and metadata/"
+                "A ReactPAI variant must contain final_images/ and metadata/"
             )
 
-        self.run_config_path = self.run_dir / "run_config.json"
-        self.annotations_path = self.run_dir / "annotations.json"
-        self.source_index_path = self.run_dir / "source_reconstruction.json"
-        self.compaction_report_path = self.run_dir / "compaction_report.json"
+        self.run_config_path = self.variant_dir / "run_config.json"
+        self.annotations_path = self.variant_dir / "annotations.json"
+        self.source_index_path = self.variant_dir / "source_reconstruction.json"
+        self.compaction_report_path = self.variant_dir / "compaction_report.json"
         self.run_config = _mapping(
             _load_json(self.run_config_path, "run configuration"),
             "run configuration",
@@ -684,7 +684,7 @@ class PAIAVCompactRun:
         try:
             return self.annotations[token]
         except KeyError as exc:
-            raise KeyError(f"Unknown compact-run token {token!r}") from exc
+            raise KeyError(f"Unknown variant token {token!r}") from exc
 
     def navigation_command(self, token: str) -> str | None:
         annotation = self.annotation(token)
@@ -920,10 +920,10 @@ class PAIAVCompactRun:
         return result
 
     def _selection_manifest(self, path: Path, expected: Any) -> Mapping[str, Any]:
-        """The run's recorded selection manifest, or a declared replacement of it.
+        """The variant's recorded selection manifest, or a declared replacement of it.
 
         A replacement (e.g. after re-downloading PAI-AV) has a new hash, so it must name
-        the recorded hash under ``restoration.replaces_sha256`` and select this run's clips/chunks.
+        the recorded hash under ``restoration.replaces_sha256`` and select this variant's clips/chunks.
         """
         if not expected:
             raise PAIAVContractError("Selection manifest checksum mismatch for collision scoring")
@@ -948,7 +948,7 @@ class PAIAVCompactRun:
                 and {chunk.get("chunk_id") for chunk in chunks if isinstance(chunk, Mapping)}
                 != set(run_chunks))
         ):
-            raise PAIAVContractError("Restored selection manifest does not match this run")
+            raise PAIAVContractError("Restored selection manifest does not match this variant")
         return manifest
 
     def collision_context(self, token: str) -> dict[str, Any]:
@@ -1021,7 +1021,7 @@ class PAIAVCompactRun:
 
     def preflight_report(self) -> dict[str, Any]:
         return {
-            "run_dir": str(self.run_dir),
+            "run_dir": str(self.variant_dir),
             "token_count": len(self.tokens),
             "camera_count": len(CAMERA_NAMES),
             "frames_per_camera": FRAMES_PER_CAMERA,
@@ -1042,7 +1042,7 @@ class PAIAVCompactRun:
             archive.close()
         self._archives.clear()
 
-    def __enter__(self) -> "PAIAVCompactRun":
+    def __enter__(self) -> "PAIAVCompactVariant":
         return self
 
     def __exit__(self, *_args: Any) -> None:

@@ -1,7 +1,7 @@
-"""Run SimWAM on a ReactNAV run (current front-camera frame and ego state; action-only inference).
+"""Run SimWAM on a ReactNAV variant (current front-camera frame and ego state; action-only inference).
 
-    python -m reactbench.models.simwam.eval RUN_DIR --original --config rl   # cache original predictions
-    python -m reactbench.models.simwam.eval RUN_DIR --config rl              # edited predictions + scoring
+    python -m reactbench.models.simwam.eval VARIANT_DIR --original --config rl   # cache original predictions
+    python -m reactbench.models.simwam.eval VARIANT_DIR --config rl              # edited predictions + scoring
 
 ``--config`` is ``rl`` (FlowGRPO, ``simwam``), ``il`` (``simwam_il``) or a path. The original and edited rollouts
 of a scene share their action noise, and both must run on the same GPU architecture (part of the cache signature).
@@ -13,7 +13,7 @@ from pathlib import Path
 from ...io import digest, file_digest
 from .. import runner
 from .agent import SimWAMAgent
-from .navsim_loader import NAVSIMRun
+from .navsim_loader import NAVSIMVariant
 
 HERE = Path(__file__).parent
 AGENT_TARGET = "reactbench.models.simwam.agent.SimWAMAgent"
@@ -34,8 +34,8 @@ class SimWAM(runner.Runner):
     config_dir = HERE / "configs"
     default_config = "rl"
 
-    def open_run(self):
-        return NAVSIMRun(self.run_dir)
+    def open_variant(self):
+        return NAVSIMVariant(self.variant_dir)
 
     def setup(self):
         if self.config.get("_target_") != AGENT_TARGET:

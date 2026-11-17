@@ -1,4 +1,4 @@
-"""Alpamayo 2's inputs from a ReactNAV run: the recorded 2 Hz camera history and the interpolated ego history."""
+"""Alpamayo 2's inputs from a ReactNAV variant: the recorded 2 Hz camera history and the interpolated ego history."""
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -11,7 +11,7 @@ from ...io import digest
 from ..alpamayo1_5.inputs import navigation_text, navsim_ego_history
 
 
-class NAVSIMRun(navsim.NAVSIMRun):
+class NAVSIMVariant(navsim.NAVSIMVariant):
     camera_profile = {"camera_names": ["CAM_L0", "CAM_F0", "CAM_R0"],
                       "camera_ids": [0, 1, 2], "frames_per_camera": 4,
                       "image_interval_s": 0.5,
@@ -20,8 +20,8 @@ class NAVSIMRun(navsim.NAVSIMRun):
                       "timestamp_source": "source-log frame timestamps; exposure timestamps unavailable",
                       "shift": "three cameras at 2 Hz versus six cameras at 10 Hz in the public notebook"}
 
-    def __init__(self, run_dir, **kwargs):
-        super().__init__(run_dir, **kwargs)
+    def __init__(self, variant_dir, **kwargs):
+        super().__init__(variant_dir, **kwargs)
         self._history = {}
 
     def _original_paths(self, token):

@@ -1,4 +1,4 @@
-"""SimWAM's inputs from a ReactNAV run: the current CAM_F0 frame and the 8-D ego state."""
+"""SimWAM's inputs from a ReactNAV variant: the current CAM_F0 frame and the 8-D ego state."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -27,14 +27,14 @@ def ego_state(annotation):
     return np.concatenate([velocity, acceleration, command]).astype(np.float32)
 
 
-class NAVSIMRun(navsim.NAVSIMRun):
+class NAVSIMVariant(navsim.NAVSIMVariant):
     input_profile = {"camera": CAMERA, "frame": "current (history index 3)",
                      "state": "current ego velocity(2), acceleration(2), driving command(4)",
                      "prompt": "fixed upstream prompt embedding, identical for every sample",
                      "history_inputs": "none; earlier edited frames are not used"}
 
-    def __init__(self, run_dir, **kwargs):
-        super().__init__(run_dir, **kwargs)
+    def __init__(self, variant_dir, **kwargs):
+        super().__init__(variant_dir, **kwargs)
         self._sources = {}
 
     def original_image_path(self, token):

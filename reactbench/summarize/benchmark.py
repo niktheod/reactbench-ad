@@ -11,7 +11,7 @@ import math
 
 import numpy as np
 
-from ..runs import OBJECTS
+from ..variants import OBJECTS
 from ..scoring.ade import THRESHOLDS_M
 from ..scoring.collisions import paired_contact_speed
 from ..scoring.motion_bins import speed_bin_sort_key

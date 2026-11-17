@@ -1,9 +1,9 @@
-"""Run DriveWAM on a ReactNAV run (original or edited front-camera image).
+"""Run DriveWAM on a ReactNAV variant (original or edited front-camera image).
 
-    python -m reactbench.models.drivewam.eval RUN_DIR --original     # cache original predictions
-    python -m reactbench.models.drivewam.eval RUN_DIR                # edited predictions + scoring
+    python -m reactbench.models.drivewam.eval VARIANT_DIR --original     # cache original predictions
+    python -m reactbench.models.drivewam.eval VARIANT_DIR                # edited predictions + scoring
 
-Predictions go to ``<outputs>/predictions/drivewam/reactnav/<run>``. The original and edited rollouts of a scene
+Predictions go to ``<outputs>/predictions/drivewam/reactnav/<variant>``. The original and edited rollouts of a scene
 share all video and action noise. ``models/runner.py`` holds everything that is not specific to DriveWAM.
 """
 from __future__ import annotations

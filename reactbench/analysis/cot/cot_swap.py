@@ -2,7 +2,7 @@
 
 The natural conditions come from the natural runs (``natural.py``); the crossed ones force the other scene's CoT
 onto an image, with the token's natural seeds: ``original_image_edited_cot`` and ``edited_image_original_cot``,
-one directory each in ``<run>_cot_swap/``. Collision metrics come from protocol V2 scoring
+one directory each in ``<variant>_cot_swap/``. Collision metrics come from protocol V2 scoring
 (``metrics/paiav_at_fault_*``), not from here.
 """
 from __future__ import annotations
@@ -219,7 +219,7 @@ def run(s) -> int:
     runner.save_json(s.result_dir / "metrics" / "per_sample.json", records)
     summary = aggregate_cot_swap_records(records)
     summary.update({
-        "mode": "cot_swap", "model": model.model, "dataset": model.dataset, "run_dir": str(model.run_dir),
+        "mode": "cot_swap", "model": model.model, "dataset": model.dataset, "run_dir": str(model.variant_dir),
         "result_dir": str(s.result_dir), "natural_original_result_dir": str(natural["original"].path),
         "natural_edited_result_dir": str(natural["edited"].path), "natural_runs": status,
         "evaluation_config_path": str(model.config_path), "identity": {"signature": s.signature, **model.identity()},
@@ -230,7 +230,7 @@ def run(s) -> int:
         "excluded_before_inference_count": excluded, "gpus": runner.gpu_names(),
         "metric_definitions": METRIC_DEFINITIONS, **model.summary_extras(), **model.cot_extras()})
     runner.save_json(s.result_dir / "metrics" / "summary.json", summary)
-    save_manifest(s.result_dir, mode="cot_swap", signature=s.signature, source_run_dir=model.run_dir,
+    save_manifest(s.result_dir, mode="cot_swap", signature=s.signature, source_run_dir=model.variant_dir,
                   selected_tokens=s.tokens, successful_tokens=successful, natural_runs=status, **model.cot_extras())
     print(f"Saved {len(records)}/{len(s.tokens)} CoT-swap samples to {s.result_dir}; {len(failures)} failures.",
           flush=True)

@@ -1,13 +1,13 @@
 """Alpamayo 2 CoT interventions on ReactPAI (paper section 4.3 and appendix): CoT swap and fixed CoTs.
 
-    python -m reactbench.analysis.cot.run_alpamayo2 RUN_DIR --cot-swap     # O/E images x O/E CoTs
-    python -m reactbench.analysis.cot.run_alpamayo2 RUN_DIR --fixed-cots   # the five CoTs of fixed_cots.yaml
+    python -m reactbench.analysis.cot.run_alpamayo2 VARIANT_DIR --cot-swap     # O/E images x O/E CoTs
+    python -m reactbench.analysis.cot.run_alpamayo2 VARIANT_DIR --fixed-cots   # the five CoTs of fixed_cots.yaml
 
-Both build on the run's natural original and edited predictions (``python -m reactbench.models.alpamayo2.eval_paiav``:
+Both build on the variant's natural original and edited predictions (``python -m reactbench.models.alpamayo2.eval_paiav``:
 same configuration, GPU architecture class and per-token seeds; ``natural.py``). The natural CoT must have been
 closed by ``<|traj_future_start|>``; it is forced as the assistant prefix ``{cot}<|traj_future_start|>``
-(``models/alpamayo2/forced_cot.py``). Results go to ``<outputs>/predictions/alpamayo2/reactpai/<run>_cot_swap`` and
-``<run>_fixed_cots``.
+(``models/alpamayo2/forced_cot.py``). Results go to ``<outputs>/predictions/alpamayo2/reactpai/<variant>_cot_swap`` and
+``<variant>_fixed_cots``.
 """
 from __future__ import annotations
 

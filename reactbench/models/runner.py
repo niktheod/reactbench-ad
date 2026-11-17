@@ -1,11 +1,11 @@
-"""Shared core of the model runners: command line, run layout, per-token loop, bookkeeping and scoring.
+"""Shared core of the model runners: command line, output layout, per-token loop, bookkeeping and scoring.
 
-Every runner evaluates one model on one benchmark run in two passes::
+Every runner evaluates one model on one benchmark variant in two passes::
 
-    python -m reactbench.models.<model>.eval RUN_DIR --original   # the original scenes, cached once per model
-    python -m reactbench.models.<model>.eval RUN_DIR              # the edited scenes of RUN_DIR, then scoring
+    python -m reactbench.models.<model>.eval VARIANT_DIR --original   # the original scenes, cached once per model
+    python -m reactbench.models.<model>.eval VARIANT_DIR              # the edited scenes of VARIANT_DIR, then scoring
 
-Predictions go to ``<outputs>/predictions/<model>/<reactnav|reactpai>/<run>`` (``original`` for the original
+Predictions go to ``<outputs>/predictions/<model>/<reactnav|reactpai>/<variant>`` (``original`` for the original
 scenes): ``trajectories/<token>.npz`` (``trajectory``: N x 3 rear-axle x/y/heading poses in the current ego frame,
 the first at t = dt, at least 4 s; ``interval_length_s``), ``metrics/per_sample.json`` and
 ``metrics/summary.json`` (the bookkeeping the scorer reads), ``evaluation_manifest.json`` (``original_cache.py``)
@@ -41,9 +41,9 @@ CONTEXT_KEYS = ("actor_motion", "speed_mps", "longitudinal_acceleration_mps2", "
 
 # --- helpers ---------------------------------------------------------------------------------------------------
 
-def predictions_dir(model: str, dataset: str, run_name: str) -> Path:
-    """Where a model's predictions for one run go: <outputs>/predictions/<model>/<dataset>/<run>."""
-    return paths.outputs("predictions", model, dataset, run_name)
+def predictions_dir(model: str, dataset: str, variant_name: str) -> Path:
+    """Where a model's predictions for one variant go: <outputs>/predictions/<model>/<dataset>/<variant>."""
+    return paths.outputs("predictions", model, dataset, variant_name)
 
 
 def expand_config(text: str) -> str:
@@ -78,7 +78,7 @@ def read_config(path: Path) -> dict[str, Any]:
 
 
 def select_tokens(available, *, tokens_file=None, max_samples=None) -> list[str]:
-    """All tokens of the run, its first ``max_samples``, or the exact ordered ``{"tokens": [...]}`` of a file."""
+    """All tokens of the variant, its first ``max_samples``, or the exact ordered ``{"tokens": [...]}`` of a file."""
     available = list(available)
     if tokens_file is not None:
         document = read_json(tokens_file)
@@ -88,7 +88,7 @@ def select_tokens(available, *, tokens_file=None, max_samples=None) -> list[str]
             raise ValueError(f"{tokens_file} needs a non-empty 'tokens' list of unique strings")
         missing = sorted(set(tokens) - set(available))
         if missing:
-            raise ValueError(f"Requested tokens are not in the run: {missing[:10]}")
+            raise ValueError(f"Requested tokens are not in the variant: {missing[:10]}")
         return tokens
     return available if max_samples is None else available[:max_samples]
 
@@ -145,7 +145,7 @@ def prepare_output(path: Path, overwrite: bool, *, remove: bool) -> None:
 
 
 def paiav_metric_context(loader, token) -> dict[str, Any]:
-    """A ReactPAI sample's bookkeeping from ``PAIAVCompactRun`` (cf. ``NAVSIMRun.metric_context``)."""
+    """A ReactPAI sample's bookkeeping from ``PAIAVCompactVariant`` (cf. ``NAVSIMVariant.metric_context``)."""
     from ..scoring.actor_motion import actor_motion_from_metadata
     metadata, metadata_path = loader.metadata(token)
     geometry, geometry_source = loader.ego_vehicle_geometry(token)
@@ -182,7 +182,7 @@ def gpu_names() -> list[str]:
 # --- the runner ------------------------------------------------------------------------------------------------
 
 class Runner:
-    """One model on one benchmark run. Subclasses fill in the model-specific parts below."""
+    """One model on one benchmark variant. Subclasses fill in the model-specific parts below."""
 
     model = ""                 # predictions folder; a configuration's ``name`` replaces it (e.g. recogdrive_il)
     datasets = ("reactnav",)   # supported datasets; the first is the default
@@ -196,18 +196,18 @@ class Runner:
         self.config_path = config_path(args.config or self.default_config, self.config_dir)
         self.config = read_config(self.config_path)
         self.model = self.config.pop("name", type(self).model)
-        self.run_dir = Path(args.run_dir).expanduser().resolve()
+        self.variant_dir = Path(args.variant_dir).expanduser().resolve()
         self.loader = None
 
     # --- model-specific parts ----------------------------------------------------------------------------------
 
-    def open_run(self):
-        """The dataset loader (a context manager): ``NAVSIMRun`` or ``PAIAVCompactRun`` (or a model subclass)."""
+    def open_variant(self):
+        """The dataset loader (a context manager): ``NAVSIMVariant`` or ``PAIAVCompactVariant`` (or a model subclass)."""
         if self.dataset == "reactnav":
-            from ..datasets.navsim import NAVSIMRun
-            return NAVSIMRun(self.run_dir)
-        from ..datasets.paiav import PAIAVCompactRun
-        return PAIAVCompactRun(self.run_dir)
+            from ..datasets.navsim import NAVSIMVariant
+            return NAVSIMVariant(self.variant_dir)
+        from ..datasets.paiav import PAIAVCompactVariant
+        return PAIAVCompactVariant(self.variant_dir)
 
     def setup(self) -> None:
         """Build the agent from ``self.config`` (no weights yet); set ``self.interval_length_s``."""
@@ -257,7 +257,7 @@ class Runner:
         """The inputs an original cache depends on, besides the per-token source contracts."""
         if self.dataset == "reactnav":
             return {"dataset": self.dataset, "annotations_sha256": file_digest(self.loader.annotations_path)}
-        return {"dataset": self.dataset, "dataset_group": self.run_dir.parent.name}
+        return {"dataset": self.dataset, "dataset_group": self.variant_dir.parent.name}
 
     def signature(self) -> dict[str, Any]:
         if self.dataset == "reactnav":
@@ -282,11 +282,12 @@ class Runner:
     def run(self) -> int:
         os.environ.setdefault("MPLBACKEND", "Agg")
         args, mode = self.args, "original" if self.original else "edited"
-        self.result_dir = predictions_dir(self.model, self.dataset, "original" if self.original else self.run_dir.name)
+        self.result_dir = predictions_dir(self.model, self.dataset,
+                                          "original" if self.original else self.variant_dir.name)
         self.original_dir = Path(args.original_result_dir or predictions_dir(self.model, self.dataset, "original"))
         self.original_dir = self.original_dir.expanduser().resolve()
         prepare_output(self.result_dir, args.overwrite, remove=False)
-        with self.open_run() as loader:
+        with self.open_variant() as loader:
             self.loader = loader
             tokens = select_tokens(loader.tokens, tokens_file=args.tokens_file, max_samples=args.max_samples)
             self.setup()
@@ -315,7 +316,7 @@ class Runner:
                 eligible = cohort.eligible_tokens
             eligible = set(eligible)
             prepare_output(self.result_dir, args.overwrite, remove=True)
-            print(f"{self.model}: {len(eligible)} {mode} samples of {self.run_dir}", flush=True)
+            print(f"{self.model}: {len(eligible)} {mode} samples of {self.variant_dir}", flush=True)
             if eligible:
                 self.load()
             records, successful = [], []
@@ -359,7 +360,7 @@ class Runner:
         summary = run_summary([] if self.original else records)
         summary.update({
             "model": self.model, "dataset": self.dataset, "mode": "original" if self.original else "paired",
-            "run_dir": str(self.run_dir), "run_config_path": str(self.loader.run_config_path),
+            "run_dir": str(self.variant_dir), "run_config_path": str(self.loader.run_config_path),
             "annotations_path": str(self.loader.annotations_path), "result_dir": str(self.result_dir),
             "original_result_dir": str(self.original_dir), "evaluation_config_path": str(self.config_path),
             "interval_length_s": self.interval_length_s, "metric_horizon_s": METRIC_HORIZON_S,
@@ -370,7 +371,7 @@ class Runner:
             "excluded_original_tokens": excluded, "excluded_input_tokens": self.excluded_inputs,
             "gpus": gpu_names(), **self.summary_extras()})
         save_json(self.result_dir / "metrics" / "summary.json", summary)
-        save_manifest(self.result_dir, mode=summary["mode"], signature=signature, source_run_dir=self.run_dir,
+        save_manifest(self.result_dir, mode=summary["mode"], signature=signature, source_run_dir=self.variant_dir,
                       selected_tokens=tokens, successful_tokens=successful, source_contracts=contracts)
         print(f"Saved {len(successful)}/{len(tokens)} predictions to {self.result_dir}; "
               f"{len(failures)} failures.", flush=True)
@@ -385,12 +386,13 @@ class Runner:
     def parser(cls, description: str, dataset: str | None = None) -> argparse.ArgumentParser:
         parser = argparse.ArgumentParser(description=description, allow_abbrev=False,
                                          formatter_class=argparse.RawDescriptionHelpFormatter)
-        parser.add_argument("run_dir", type=Path, help="Benchmark run (final_images/, metadata/, run_config.json)")
+        parser.add_argument("variant_dir", type=Path,
+                            help="Benchmark variant (final_images/, metadata/, run_config.json)")
         names = sorted(path.stem for path in Path(cls.config_dir).glob("*.yaml"))
         parser.add_argument("--config", help=f"Configuration: {', '.join(names)} (in {Path(cls.config_dir).name}/) "
                                              "or a path")
         parser.add_argument("--dataset", choices=cls.datasets, default=dataset or cls.datasets[0],
-                            help=f"Dataset of RUN_DIR (default {dataset or cls.datasets[0]})")
+                            help=f"Dataset of VARIANT_DIR (default {dataset or cls.datasets[0]})")
         parser.add_argument("--original", action="store_true",
                             help="Predict the original scenes (cached in <dataset>/original for the edited runs)")
         selection = parser.add_mutually_exclusive_group()

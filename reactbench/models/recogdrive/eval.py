@@ -1,10 +1,10 @@
-"""Run ReCogDrive on a ReactNAV run (original or edited front-camera image).
+"""Run ReCogDrive on a ReactNAV variant (original or edited front-camera image).
 
-    python -m reactbench.models.recogdrive.eval RUN_DIR --original --config rl   # cache original predictions
-    python -m reactbench.models.recogdrive.eval RUN_DIR --config rl              # edited predictions + scoring
+    python -m reactbench.models.recogdrive.eval VARIANT_DIR --original --config rl   # cache original predictions
+    python -m reactbench.models.recogdrive.eval VARIANT_DIR --config rl              # edited predictions + scoring
 
 ``--config`` is one of the files in ``configs/`` (``vlm_sft``, ``il``, ``rl``, ``il_rt``) or a path.
-Predictions go to ``<outputs>/predictions/<name>/reactnav/<run>``, where ``name`` comes from the configuration.
+Predictions go to ``<outputs>/predictions/<name>/reactnav/<variant>``, where ``name`` comes from the configuration.
 The original and edited rollouts of a scene share all diffusion noise; the VLM (``vlm_sft``) decodes greedily
 and saves its answers in ``responses/``.
 """

@@ -4,12 +4,12 @@
 #
 #   scripts/composite_paiav.sh [--standing | --car] [--max-samples N] [--output-root DIR] [--keep-intermediates] \
 #                              TAU        (look-ahead time in seconds: 0.5, 1.0, 1.5 or 2.0)
-# The run is named <object>_tau<TAU>s, as on ReactNAV:
+# The variant is named <object>_tau<TAU>s, as on ReactNAV:
 # ReactPAI:  scripts/composite_paiav.sh --car 2.0                (car_tau2.0s)
 #            scripts/composite_paiav.sh --standing 2.0           (standing_pedestrian_tau2.0s)
 #            scripts/composite_paiav.sh 2.0                      (crossing_pedestrian_tau2.0s)
 # Inputs: paiav_root (the PAI-AV download), reactpai_manifest (data/reactpai/selection_manifest.json),
-# data/reactpai/directions.json (crossing directions); outputs: <output root>/<run name> (default: `reactpai`).
+# data/reactpai/directions.json (crossing directions); outputs: <output root>/<variant name> (default: `reactpai`).
 # Environment: PYTHON (compositing environment), PCTNET_PYTHON (libcom environment), RENDER_WORKERS (1),
 # RENDER_BATCH_SIZE (96), FINALIZE_WORKERS (4), COMPACT_WORKERS (4).
 set -euo pipefail
@@ -26,13 +26,13 @@ while (( $# > 1 )); do
     esac
 done
 TAU="${1:?TAU}"
-RUN="$(cd "$REPO" && "$PYTHON" -m reactbench.runs pai-av "$OBJECT" "$TAU")"  # "<object>_tau<TAU>s k"
-read -r RUN_NAME TIMESTEP <<< "$RUN"
-OUTPUT_ROOT="${OUTPUT_ROOT:-$(location reactpai datasets/reactpai)}"; RUN_DIR="$OUTPUT_ROOT/$RUN_NAME"
+NAMED="$(cd "$REPO" && "$PYTHON" -m reactbench.variants pai-av "$OBJECT" "$TAU")"  # "<object>_tau<TAU>s k"
+read -r VARIANT TIMESTEP <<< "$NAMED"
+OUTPUT_ROOT="${OUTPUT_ROOT:-$(location reactpai datasets/reactpai)}"; VARIANT_DIR="$OUTPUT_ROOT/$VARIANT"
 EGO_MASKS=(--ego-mask-cache "$OUTPUT_ROOT/_cache/ego_masks")  # next to the depth cache (<output root>/_cache)
 DATA=(--data-root "$(location paiav_root)" --manifest "$(location reactpai_manifest data/reactpai/selection_manifest.json)")
 ASSETS="$(location assets assets)/rocketbox/assets"; [[ "${MODE[0]}" == --car ]] && ASSETS="$(location assets assets)/openx/assets"
-COMMON=("${DATA[@]}" --asset-dir "$ASSETS" --output-root "$OUTPUT_ROOT" --run-name "$RUN_NAME" --timestep "$TIMESTEP"
+COMMON=("${DATA[@]}" --asset-dir "$ASSETS" --output-root "$OUTPUT_ROOT" --run-name "$VARIANT" --timestep "$TIMESTEP"
         --anchor-time-s 5.1 --occlusion-mode dense --samples 16 --render-scale 1 --ego-mask-mode refined-gls "${EGO_MASKS[@]}"
         "${MAX[@]}" "${MODE[@]}" --render-workers "${RENDER_WORKERS:-1}" --render-batch-size "${RENDER_BATCH_SIZE:-96}"
         --finalize-workers "${FINALIZE_WORKERS:-4}")
@@ -40,16 +40,16 @@ export PYTHONUNBUFFERED=1
 cd "$REPO"
 echo "== ego masks"
 "$PYTHON" -B -m reactbench.compositing.paiav.prepare_ego_masks "${DATA[@]}" --anchor-time-s 5.1 \
-    --ego-mask-mode refined-gls "${EGO_MASKS[@]}" "${MAX[@]}" --status "$RUN_DIR/ego_mask_preparation.json"
-echo "== prepare ($RUN_DIR)"; "$PYTHON" -u -m reactbench.compositing.paiav.edit "${COMMON[@]}" --stage prepare
+    --ego-mask-mode refined-gls "${EGO_MASKS[@]}" "${MAX[@]}" --status "$VARIANT_DIR/ego_mask_preparation.json"
+echo "== prepare ($VARIANT_DIR)"; "$PYTHON" -u -m reactbench.compositing.paiav.edit "${COMMON[@]}" --stage prepare
 echo "== render";             "$PYTHON" -u -m reactbench.compositing.paiav.edit "${COMMON[@]}" --stage render
 echo "== harmonize"
-"${PCTNET_PYTHON:-$PYTHON}" -u -m reactbench.compositing.paiav.run_pctnet_folder "$RUN_DIR/images" \
-    --output-root "$RUN_DIR/final_images" --mask-threshold 250 --device 0 --completion-dir "$RUN_DIR/completed_tokens" \
+"${PCTNET_PYTHON:-$PYTHON}" -u -m reactbench.compositing.paiav.run_pctnet_folder "$VARIANT_DIR/images" \
+    --output-root "$VARIANT_DIR/final_images" --mask-threshold 250 --device 0 --completion-dir "$VARIANT_DIR/completed_tokens" \
     --roi-padding 1.0 --min-foreground-pixels 256 --min-bbox-width 12 --min-bbox-height 24 --blend-strength 0.5 \
     --max-mean-color-shift 24 --min-contrast-ratio 0.5 --overwrite
 if (( ! KEEP )); then
     echo "== validate and compact"
-    OMP_NUM_THREADS=1 "$PYTHON" -u -m reactbench.compositing.paiav.compact_run "$RUN_DIR" \
+    OMP_NUM_THREADS=1 "$PYTHON" -u -m reactbench.compositing.paiav.compact_run "$VARIANT_DIR" \
         --workers "${COMPACT_WORKERS:-4}" --pctnet-mask-threshold 250
 fi

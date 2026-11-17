@@ -63,13 +63,13 @@ def load_yaml_mapping(path: Path) -> dict[str, Any]:
 
 
 def select_tokens(available: Sequence[str], tokens_file: Path) -> list[str]:
-    """The ordered tokens of ``tokens_file``; each must be in the input run."""
+    """The ordered tokens of ``tokens_file``; each must be in the input variant."""
     if len(available) != len(set(available)):
-        raise ValueError("The input run has duplicate tokens")
+        raise ValueError("The input variant has duplicate tokens")
     requested = read_tokens_file(resolve_file(tokens_file, "token list"))
     missing = sorted(set(requested).difference(available))
     if missing:
-        raise ValueError(f"Requested tokens are absent from the input run: {missing}")
+        raise ValueError(f"Requested tokens are absent from the input variant: {missing}")
     return requested
 
 
@@ -83,8 +83,8 @@ def successful_original_tokens(prediction_dir: Path) -> list[str]:
     return unique_tokens(manifest.get("successful_tokens"), str(manifest_path))
 
 
-def run_tokens(run_dir: Path) -> list[str]:
-    final_images = resolve_directory(Path(run_dir) / "final_images", "final images")
+def variant_tokens(variant_dir: Path) -> list[str]:
+    final_images = resolve_directory(Path(variant_dir) / "final_images", "final images")
     return sorted(checked_token(path.name) for path in final_images.iterdir() if path.is_dir())
 
 
@@ -101,7 +101,7 @@ def choose_tokens(pools: Sequence[Sequence[str]], *, count: int, seed: int) -> t
 def write_token_selection(
     output: Path,
     *,
-    run_dir: Path,
+    variant_dir: Path,
     prediction_dirs: Mapping[str, Path],
     count: int,
     seed: int,
@@ -111,7 +111,7 @@ def write_token_selection(
     if output.exists() and not overwrite:
         raise FileExistsError(f"{output} exists; pass --overwrite to replace the selection")
     pools = [successful_original_tokens(path) for path in prediction_dirs.values()]
-    pools.append(run_tokens(run_dir))
+    pools.append(variant_tokens(variant_dir))
     tokens, pool_size = choose_tokens(pools, count=count, seed=seed)
     document = {"tokens": tokens, "count": count, "seed": seed, "pool_size": pool_size}
     write_json(output, document)

@@ -20,7 +20,7 @@ from .knockout import (
     build_parser,
     run_conditions,
     saved_reasoning,
-    select_run_tokens,
+    select_variant_tokens,
     validate_args,
 )
 
@@ -38,17 +38,17 @@ def main(argv: Sequence[str] | None = None) -> None:
     validate_args(parser, args)
     from ...models.alpamayo2.eval import TARGET
     from ...models.alpamayo2.inference import Alpamayo2Inference, paired_seed
-    from ...models.alpamayo2.paiav_loader import PAIAVRun
+    from ...models.alpamayo2.paiav_loader import PAIAVVariant
     from ...models.runner import read_config
 
-    run_dir = resolve_directory(args.run_dir, "run directory")
+    variant_dir = resolve_directory(args.variant_dir, "variant directory")
     config_path = resolve_file(args.config, "Alpamayo 2 configuration")
     cfg = read_config(config_path)
     if cfg.get("_target_") != TARGET:
         raise ValueError(f"Alpamayo 2 configuration must have _target_: {TARGET}")
     agent = Alpamayo2Inference(**{key: value for key, value in cfg.items() if not key.startswith("_")})
-    with PAIAVRun(run_dir) as loader:
-        tokens = select_run_tokens(list(loader.tokens), args)
+    with PAIAVVariant(variant_dir) as loader:
+        tokens = select_variant_tokens(list(loader.tokens), args)
         agent.initialize()
         model = agent.model
         if getattr(model, "_diffusion_expert_cuda_graph", None) is not None:
@@ -99,7 +99,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 model=MODEL,
                 dataset="pai-av",
                 inputs="original",
-                run_dir=run_dir.name,
+                run_dir=variant_dir.name,  # key kept for existing results
                 config=config_path.name,
                 text_seed=int(text_seed),
                 diffusion_seed=int(natural_seed),

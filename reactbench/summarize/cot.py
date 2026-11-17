@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from ..analysis.cot.cot_swap import CROSSED_EDITED_IMAGE, CROSSED_ORIGINAL_IMAGE, NATURAL_EDITED, NATURAL_ORIGINAL
 from ..analysis.cot.fixed_cot import CONDITIONS as FIXED_CONDITIONS
-from ..runs import OBJECTS, run_name
+from ..variants import OBJECTS, variant_name
 from .benchmark import _indexed, own_pairs
 from .runs import MODELS
 from .stats import bootstrap_mean
@@ -19,7 +19,7 @@ SWAP_CONDITIONS = {"OO": NATURAL_ORIGINAL, "OE": CROSSED_ORIGINAL_IMAGE,
 
 def _run(runs, model, obj, suffix):
     root = runs.directory(model, "reactpai")
-    for name in (run_name(obj, TAU_S, "pai-av"),):
+    for name in (variant_name(obj, TAU_S, "pai-av"),):
         path = root / f"{name}_{suffix}"
         if path.is_dir():
             return path

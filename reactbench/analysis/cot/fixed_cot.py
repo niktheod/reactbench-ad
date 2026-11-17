@@ -2,7 +2,7 @@
 
 Each condition of ``fixed_cots.yaml`` (accelerate, resume speed, slow down, yield, immediate stop; worded per
 object) is forced on every edited sample with the token's natural seeds, one directory per condition in
-``<run>_fixed_cots/``; the natural original and edited runs (``natural.py``) are the references. Speeds and stops
+``<variant>_fixed_cots/``; the natural original and edited runs (``natural.py``) are the references. Speeds and stops
 are computed here; collision metrics come from protocol V2 scoring (``metrics/paiav_at_fault_*``).
 """
 from __future__ import annotations
@@ -64,7 +64,7 @@ def load_config(path):
 
 
 def object_type(metadata):
-    """The inserted object of a run configuration or actor motion (never a directory name)."""
+    """The inserted object of a variant's configuration or actor motion (never a directory name)."""
     actor = metadata.get("actor_type", "pedestrian")
     if actor == "car":
         return "car"
@@ -185,7 +185,7 @@ def run(s) -> int:
     baselines = {ORIGINAL: baselines["original"], BASELINE: baselines["edited"]}
     # Hashed into every intervention: the model's settings, the fixed CoTs and the inputs they apply to.
     identity = {
-        "schema_version": SCHEMA_VERSION, "signature": s.signature, "run_dir": str(model.run_dir),
+        "schema_version": SCHEMA_VERSION, "signature": s.signature, "run_dir": str(model.variant_dir),
         "run_config_sha256": file_digest(loader.run_config_path), "fixed_config": fixed,
         "fixed_config_sha256": file_digest(fixed_path), "conditions": texts, "object_type": kind,
         "insertion_timestep": loader.run_config.get("future_timestep"),
@@ -208,7 +208,7 @@ def run(s) -> int:
             context = model.metric_context(token)
             actor, speed = context["actor_motion"], context["speed_mps"]
             if object_type(actor) != kind:
-                raise ValueError(f"Actor metadata differs from run object type for {token}")
+                raise ValueError(f"Actor metadata differs from the variant's object type for {token}")
             record.update(actor_motion=actor, ego_geometry=context.get("vehicle_geometry"), speed_mps=speed,
                           longitudinal_acceleration_mps2=context.get("longitudinal_acceleration_mps2"),
                           placement_metadata_path=context["placement_metadata_path"], ego_origin="rear_axle")
@@ -277,12 +277,12 @@ def run(s) -> int:
               f"{sum(name in record['conditions'] for name in CONDITIONS)}/{len(CONDITIONS)} conditions", flush=True)
     runner.save_json(root / "metrics" / "per_sample.json", records)
     summary = {**aggregate(records, s.tokens), "mode": "fixed_cots", "model": model.model, "dataset": model.dataset,
-               "run_dir": str(model.run_dir), "identity": identity, "baselines": baselines,
+               "run_dir": str(model.variant_dir), "identity": identity, "baselines": baselines,
                "failure_count": len(failures), "result_dir": str(root), "interval_length_s": dt,
                "metric_horizon_s": runner.METRIC_HORIZON_S, "gpus": runner.gpu_names(),
                "metric_definitions": METRIC_DEFINITIONS, **model.summary_extras()}
     runner.save_json(root / "metrics" / "summary.json", summary)
-    save_manifest(root, mode="fixed_cots", signature=s.signature, source_run_dir=model.run_dir,
+    save_manifest(root, mode="fixed_cots", signature=s.signature, source_run_dir=model.variant_dir,
                   selected_tokens=s.tokens, successful_tokens=successful, identity=identity)
     print(f"Saved fixed-CoT results: {root}; paired comparison count={summary['comparison_count']}", flush=True)
     return 0 if successful else 1

@@ -1,12 +1,12 @@
 """Score saved predictions on ReactNAV or ReactPAI.
 
-    python -m reactbench.scoring PREDICTIONS [PREDICTIONS ...] [--run RUN_DIR] [--workers N] [--output-root DIR]
+    python -m reactbench.scoring PREDICTIONS [PREDICTIONS ...] [--variant VARIANT_DIR] [--workers N] [--output-root DIR]
 
-PREDICTIONS is one run of predictions, ``<model>/<reactnav|reactpai>/<run>`` holding
+PREDICTIONS is one run of predictions, ``<model>/<reactnav|reactpai>/<variant>`` holding
 ``trajectories/<token>.npz`` (README "Evaluating your model"), or a folder of such runs, e.g.
 ``<outputs>/predictions/<model>/reactnav``. The original-scene predictions are in the sibling ``original/``. The
-benchmark run defaults to ``<reactnav|reactpai>/<run>`` from configs/paths.yaml (``--run`` names it for a single
-run). Each run gets ``metrics/<navsim|paiav>_at_fault_{per_sample,summary,manifest}.json``, under
+benchmark variant defaults to ``<reactnav|reactpai>/<variant>`` from configs/paths.yaml (``--variant`` names it for
+a single run). Each run gets ``metrics/<navsim|paiav>_at_fault_{per_sample,summary,manifest}.json``, under
 ``--output-root`` when given. ReactNAV scoring needs the NAVSIM devkit (``scoring_python``), ReactPAI scoring
 the PAI-AV download (``paiav_root``). Exits non-zero if any run fails.
 """
@@ -35,8 +35,8 @@ def runs_under(path):
     return sorted(p for p in path.iterdir() if p.is_dir() and p.name != "original" and is_run(p))
 
 
-def benchmark_run(run, dataset, explicit):
-    """The benchmark run of a predictions run: explicit, named by its bookkeeping, or <reactnav|reactpai>/<run>."""
+def benchmark_variant(run, dataset, explicit):
+    """The benchmark variant of a predictions run: explicit, named by its bookkeeping, or <reactnav|reactpai>/<name>."""
     if explicit is not None:
         return Path(explicit).resolve()
     if (run / "metrics" / "summary.json").is_file():
@@ -50,12 +50,12 @@ def score(job):
         if dataset == "navsim":
             from . import navsim
             summary = navsim.process_result(run, navsim.load_config({"workers": workers}), output_root=output,
-                                            run_dir=bench)
+                                            variant_dir=bench)
             coverage = summary.get("overall", {}).get("coverage", summary.get("status"))
         else:
             from . import paiav
             coverage = paiav.process_result(run, paiav.load_config({"workers": 1}), output_root=output,
-                                            run_dir=bench).get("coverage")
+                                            variant_dir=bench).get("coverage")
         return str(run), coverage, None
     except Exception as exc:
         return str(run), None, f"{type(exc).__name__}: {exc}"
@@ -64,7 +64,8 @@ def score(job):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("predictions", nargs="+", type=Path, help="A predictions run, or a folder of runs")
-    parser.add_argument("--run", type=Path, help="Benchmark run (final_images/, metadata/) of a single predictions run")
+    parser.add_argument("--variant", type=Path, metavar="VARIANT_DIR",
+                        help="Benchmark variant (final_images/, metadata/) of a single predictions run")
     parser.add_argument("--dataset", choices=sorted(PATH_KEYS.values()),
                         help="Default: the parent folder of each run (reactnav or reactpai)")
     parser.add_argument("--workers", type=int, default=1, help="CPU processes (default 1)")
@@ -78,17 +79,17 @@ def main(argv=None):
         runs = runs_under(base)
         if not runs:
             parser.error(f"no predictions run under {base}")
-        if args.run is not None and (len(runs) > 1 or len(args.predictions) > 1):
-            parser.error("--run names the benchmark run of a single predictions run")
+        if args.variant is not None and (len(runs) > 1 or len(args.predictions) > 1):
+            parser.error("--variant names the benchmark variant of a single predictions run")
         for run in runs:
             dataset = ({v: k for k, v in PATH_KEYS.items()}[args.dataset] if args.dataset
                        else DATASET_FOLDERS.get(run.parent.name))
             if dataset is None:
-                parser.error(f"cannot tell the dataset of {run}: use <model>/<reactnav|reactpai>/<run> or --dataset")
+                parser.error(f"cannot tell the dataset of {run}: use <model>/<reactnav|reactpai>/<variant> or --dataset")
             output = None
             if args.output_root is not None:
                 output = args.output_root / (run.name if run == base.resolve() else run.relative_to(base.resolve()))
-            jobs.append((run, dataset, benchmark_run(run, dataset, args.run), output, args.workers))
+            jobs.append((run, dataset, benchmark_variant(run, dataset, args.variant), output, args.workers))
     # ReactNAV parallelizes within a run (its scoring backend); ReactPAI across runs.
     navsim_jobs = [job for job in jobs if job[1] == "navsim"]
     paiav_jobs = [job for job in jobs if job[1] == "pai-av"]

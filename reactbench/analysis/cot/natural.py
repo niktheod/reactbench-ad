@@ -1,13 +1,14 @@
 """The natural runs the CoT interventions build on, and the command line of both CoT runners.
 
 A CoT runner (``run_alpamayo1_5.py``, ``run_alpamayo2.py``) starts from its model's finished natural runs on a
-ReactPAI run, made by the model's runner (``models/<model>/eval.py``): ``original/`` and the edited run ``<run>/``.
+ReactPAI variant, made by the model's runner (``models/<model>/eval.py``): ``original/`` and the edited run
+``<variant>/``.
 Both must carry this configuration's cache signature (``models/original_cache.py``) and, per token, the same source
 contract and seeds; their decoded CoTs are the CoT-swap donors and their trajectories the natural conditions.
 Forced rollouts reuse each token's natural seeds. Results go next to the natural runs::
 
-    python -m reactbench.analysis.cot.run_<model> RUN_DIR --cot-swap     # <run>_cot_swap: O/E images x O/E CoTs
-    python -m reactbench.analysis.cot.run_<model> RUN_DIR --fixed-cots   # <run>_fixed_cots: fixed_cots.yaml
+    python -m reactbench.analysis.cot.run_<model> VARIANT_DIR --cot-swap     # <variant>_cot_swap: O/E images x O/E CoTs
+    python -m reactbench.analysis.cot.run_<model> VARIANT_DIR --fixed-cots   # <variant>_fixed_cots: fixed_cots.yaml
 """
 from __future__ import annotations
 
@@ -48,11 +49,11 @@ class NaturalOutput:
 class NaturalRun:
     """A finished natural run (``mode`` original or paired) of the same configuration."""
 
-    def __init__(self, path, *, mode, signature, run_dir=None):
+    def __init__(self, path, *, mode, signature, variant_dir=None):
         self.path, self.mode = Path(path).expanduser().resolve(), mode
         manifest_path, manifest = read_manifest(self.path, mode=mode, signature=signature)
-        if run_dir is not None and manifest.get("source_run_dir") != str(run_dir):
-            raise ValueError(f"{manifest_path} was computed from {manifest.get('source_run_dir')}, not {run_dir}")
+        if variant_dir is not None and manifest.get("source_run_dir") != str(variant_dir):
+            raise ValueError(f"{manifest_path} was computed from {manifest.get('source_run_dir')}, not {variant_dir}")
         self.selected, self.successful = set(manifest["selected_tokens"]), set(manifest["successful_tokens"])
         self.contracts = manifest.get("source_contracts")
         if not isinstance(self.contracts, dict):
@@ -89,10 +90,10 @@ class NaturalRun:
 def natural_runs(s, *, required):
     """{"original": NaturalRun, "edited": NaturalRun}; a missing run is an error if ``required``, else None."""
     runs, status = {}, {}
-    for name, path, mode, run_dir in (("original", s.original_dir, "original", None),
-                                      ("edited", s.edited_dir, "paired", s.model.run_dir)):
+    for name, path, mode, variant_dir in (("original", s.original_dir, "original", None),
+                                      ("edited", s.edited_dir, "paired", s.model.variant_dir)):
         try:
-            runs[name] = NaturalRun(path, mode=mode, signature=s.signature, run_dir=run_dir)
+            runs[name] = NaturalRun(path, mode=mode, signature=s.signature, variant_dir=variant_dir)
             status[name] = runs[name].status
         except FileNotFoundError as exc:
             if required:
@@ -104,7 +105,7 @@ def natural_runs(s, *, required):
 def parse_args(description, argv=None):
     parser = argparse.ArgumentParser(description=description, allow_abbrev=False,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("run_dir", type=Path, help="ReactPAI run (its natural runs must be finished)")
+    parser.add_argument("variant_dir", type=Path, help="ReactPAI variant (its natural runs must be finished)")
     parser.add_argument("--config", help="The natural runs' configuration (default: the model's config.yaml)")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--cot-swap", action="store_true",
@@ -115,7 +116,7 @@ def parse_args(description, argv=None):
     selection.add_argument("--max-samples", type=int, help="Only the first N clips (a smoke test)")
     selection.add_argument("--tokens-file", type=Path, help="JSON with the exact ordered 'tokens'")
     parser.add_argument("--original-result-dir", type=Path, help="Natural original run (default reactpai/original)")
-    parser.add_argument("--edited-result-dir", type=Path, help="Natural edited run (default reactpai/<run>)")
+    parser.add_argument("--edited-result-dir", type=Path, help="Natural edited run (default reactpai/<variant>)")
     parser.add_argument("--scoring", choices=("score", "off"), default="score",
                         help="Score the result on CPU afterwards (default) or not")
     parser.add_argument("--overwrite", action="store_true", help="Replace an existing output directory")
@@ -134,13 +135,13 @@ def main(model_class, description, argv=None):
     group = runner.predictions_dir(model.model, args.dataset, "original").parent
     mode = "cot_swap" if args.cot_swap else "fixed_cots"
     s = SimpleNamespace(
-        args=args, model=model, mode=mode, result_dir=group / f"{model.run_dir.name}{SUFFIXES[mode]}",
+        args=args, model=model, mode=mode, result_dir=group / f"{model.variant_dir.name}{SUFFIXES[mode]}",
         original_dir=Path(args.original_result_dir or group / "original").expanduser().resolve(),
-        edited_dir=Path(args.edited_result_dir or group / model.run_dir.name).expanduser().resolve())
+        edited_dir=Path(args.edited_result_dir or group / model.variant_dir.name).expanduser().resolve())
     if s.result_dir in (s.original_dir, s.edited_dir):
         raise ValueError("Intervention results must not be written into a natural run directory")
     runner.prepare_output(s.result_dir, args.overwrite, remove=False)
-    with model.open_run() as loader:
+    with model.open_variant() as loader:
         model.loader = loader
         model.setup()
         s.tokens = runner.select_tokens(loader.tokens, tokens_file=args.tokens_file, max_samples=args.max_samples)

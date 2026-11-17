@@ -1,6 +1,6 @@
-"""The released ReactNAV runs: packing them (authors) and completing them with the user's navtest images.
+"""The released ReactNAV variants: packing them (authors) and completing them with the user's navtest images.
 
-A ReactNAV run ``<object>_tau<tau>s`` (e.g. ``car_tau1.0s``) holds, per navtest token, the twelve model inputs
+A ReactNAV variant ``<object>_tau<tau>s`` (e.g. ``car_tau1.0s``) holds, per navtest token, the twelve model inputs
 ``final_images/<token>/{CAM_L0,CAM_F0,CAM_R0}/{0,1,2,3}.{png,jpg}`` (frame 3 is the current frame, 0.5 s apart),
 the placement of the inserted object in ``metadata/<token>.json``, and ``run_config.json``. Only the frames that
 the object changes are released, as JPEGs with navtest's own settings (quality 80, 4:2:0 chroma subsampling); the
@@ -8,10 +8,10 @@ compositor writes them as lossless PNGs, which the paper evaluated. The unchange
 JPEGs, which ``link`` adds as links into the user's NAVSIM ``sensor_blobs`` (paths from the NAVSIM annotations):
 
     python -m reactbench.datasets.navsim_annotations data/reactnav/reactnav.yaml   # <outputs>/annotations/reactnav.json
-    python -m reactbench.datasets.reactnav link [RUNS_ROOT]                         # default: reactnav in configs/paths.yaml
+    python -m reactbench.datasets.reactnav link [VARIANTS_ROOT]                     # default: reactnav in configs/paths.yaml
 
 Authors: ``python -m reactbench.datasets.reactnav pack SOURCE_ROOT OUTPUT_ROOT`` saves the edited frames of
-compacted compositor runs as JPEGs, copies their metadata and writes a ``run_config.json`` without machine paths.
+the compacted compositor outputs as JPEGs, copies their metadata and writes a ``run_config.json`` without machine paths.
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from PIL import Image
 
 from .. import paths
 from ..io import read_json, relative, write_json
-from ..runs import parse_run_name
+from ..variants import parse_variant_name
 
 CAMERAS = {"CAM_L0": "front_left_camera", "CAM_F0": "front_camera", "CAM_R0": "front_right_camera"}
 FRAMES = 4
@@ -33,49 +33,49 @@ SUFFIXES = (".png", ".jpg", ".jpeg")
 JPEG_OPTIONS = {"quality": 80, "subsampling": "4:2:0", "optimize": True}
 
 
-def released_runs(root):
-    """{run name: run directory} of the insertion runs under ``root``."""
-    return {run.name: run for run in sorted(Path(root).iterdir())
-            if run.is_dir() and parse_run_name(run.name, "navsim")}
+def released_variants(root):
+    """{variant name: variant directory} of the insertion variants under ``root``."""
+    return {variant.name: variant for variant in sorted(Path(root).iterdir())
+            if variant.is_dir() and parse_variant_name(variant.name, "navsim")}
 
 
-def pack(source_root, output_root, *, runs=None, max_tokens=None):
-    """Save the edited frames of each run as JPEGs and copy its metadata; unchanged frames (links to navtest) are
+def pack(source_root, output_root, *, variants=None, max_tokens=None):
+    """Save the edited frames of each variant as JPEGs and copy its metadata; unchanged frames (links to navtest) are
     left out."""
     output_root = Path(output_root)
-    for name, run in released_runs(source_root).items():
-        if runs and name not in runs:
+    for name, variant in released_variants(source_root).items():
+        if variants and name not in variants:
             continue
         target = output_root / name
-        config = relative(read_json(run / "run_config.json"))
+        config = relative(read_json(variant / "run_config.json"))
         config.pop("data_root", None)
         config["scene_filter"] = SCENE_FILTER
-        tokens = sorted(p.name for p in (run / "final_images").iterdir() if p.is_dir())[:max_tokens]
+        tokens = sorted(p.name for p in (variant / "final_images").iterdir() if p.is_dir())[:max_tokens]
         if max_tokens is not None:
             config["selected_tokens"] = [t for t in config.get("selected_tokens", tokens) if t in set(tokens)]
         write_json(target / "run_config.json", config)
         edited = 0
         for token in tokens:
-            for image in sorted((run / "final_images" / token).rglob("*")):
+            for image in sorted((variant / "final_images" / token).rglob("*")):
                 if image.is_file() and not image.is_symlink():
                     if image.suffix != ".png":
-                        raise ValueError(f"Edited frames of a compacted run are PNGs: {image}")
-                    destination = target / "final_images" / image.relative_to(run / "final_images")
+                        raise ValueError(f"Edited frames of a compacted variant are PNGs: {image}")
+                    destination = target / "final_images" / image.relative_to(variant / "final_images")
                     destination = destination.with_suffix(".jpg")
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     with Image.open(image) as frame:
                         frame.convert("RGB").save(destination, "JPEG", **JPEG_OPTIONS)
                     edited += 1
-            write_json(target / "metadata" / f"{token}.json", relative(read_json(run / "metadata" / f"{token}.json")))
+            write_json(target / "metadata" / f"{token}.json", relative(read_json(variant / "metadata" / f"{token}.json")))
         print(f"{name}: {len(tokens)} tokens, {edited} edited frames", flush=True)
 
 
-def link(runs_root, annotations_file):
+def link(variants_root, annotations_file):
     """Add the unchanged frames of every token as links to the user's navtest images."""
     annotations = {r["token"]: r for r in json.loads(Path(annotations_file).read_text())}
-    for name, run in released_runs(runs_root).items():
+    for name, variant in released_variants(variants_root).items():
         added = 0
-        for token_dir in sorted(p for p in (run / "final_images").iterdir() if p.is_dir()):
+        for token_dir in sorted(p for p in (variant / "final_images").iterdir() if p.is_dir()):
             annotation = annotations.get(token_dir.name)
             if annotation is None:
                 raise KeyError(f"{token_dir.name} is not in {annotations_file}")
@@ -99,19 +99,19 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
     command = commands.add_parser("link", help="Add the unchanged navtest frames (users)")
-    command.add_argument("runs_root", type=Path, nargs="?", help="Default: reactnav in configs/paths.yaml")
+    command.add_argument("variants_root", type=Path, nargs="?", help="Default: reactnav in configs/paths.yaml")
     command.add_argument("--annotations", type=Path, help="Default: <outputs>/annotations/reactnav.json")
     command = commands.add_parser("pack", help="Save the edited frames (JPEG) and metadata for release (authors)")
     command.add_argument("source_root", type=Path)
     command.add_argument("output_root", type=Path)
-    command.add_argument("--runs", nargs="+", help="Released run names (default: all insertion runs)")
-    command.add_argument("--max-tokens", type=int, help="First N tokens of each run (a check)")
+    command.add_argument("--variants", nargs="+", help="Released variant names (default: all insertion variants)")
+    command.add_argument("--max-tokens", type=int, help="First N tokens of each variant (a check)")
     args = parser.parse_args(argv)
     if args.command == "link":
         annotations = args.annotations or paths.get("annotations", paths.outputs("annotations")) / "reactnav.json"
-        link(args.runs_root or paths.get("reactnav"), annotations)
+        link(args.variants_root or paths.get("reactnav"), annotations)
     else:
-        pack(args.source_root, args.output_root, runs=args.runs, max_tokens=args.max_tokens)
+        pack(args.source_root, args.output_root, variants=args.variants, max_tokens=args.max_tokens)
 
 
 if __name__ == "__main__":
